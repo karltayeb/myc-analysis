@@ -1,14 +1,14 @@
 import numpy as np
 from multiprocessing import Pool
-from .LDSMethods import (_update_observation_covariance,
-                         _update_transition_covariances,
-                         _update_component_weights,
-                         _update_initial_state_means,
-                         _update_initial_state_covariance,
-                         _estimate_states, _estimate_states2,
-                         _estimate_responsibilities,
-                         _single_estimate_states,
-                         _elbo)
+from LDSMethods import (_update_observation_covariance,
+                        _update_transition_covariances,
+                        _update_component_weights,
+                        _update_initial_state_means,
+                        _update_initial_state_covariance,
+                        _estimate_states, _estimate_states2,
+                        _estimate_responsibilities,
+                        _single_estimate_states,
+                        _elbo)
 import functools
 
 
@@ -137,12 +137,19 @@ class LDSMixture:
 
         if 'state_means' in dictionary:
             self.state_means = dictionary['state_means']
+        else:
+            self.state_means = np.zeros((self.K, self.T, self.U))
 
         if 'state_covariances' in dictionary:
             self.state_covariances = dictionary['state_covariances']
+        else:
+            self.state_covariances = np.zeros((self.K, self.T, self.V, self.V))
 
         if 'pairwise_covariances' in dictionary:
             self.pairwise_covariances = dictionary['pairwise_covariances']
+        else:
+            self.pairwise_covariances = \
+                np.zeros((self.K, self.T, self.V, self.V))
 
     def expectation_maximization(self, data, threshold=1e-3, iter_max=1000):
         """
