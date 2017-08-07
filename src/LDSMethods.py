@@ -4,7 +4,7 @@ import numpy as np
 import scipy as sp
 import functools
 from multiprocessing import Pool
-from scipy.special import logsumexp
+from scipy.misc import logsumexp
 from scipy.stats import multivariate_normal
 
 
