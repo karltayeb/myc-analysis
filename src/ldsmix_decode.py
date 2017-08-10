@@ -38,15 +38,15 @@ if __name__ == "__main__":
         model_save_path = '/'.join(output_directory.split('/')) \
             + '/model' + str(i)
         pickle.dump(model, open(model_save_path, 'wb'))
-	
+
         i += 1
         print(i)
         print('Estimating states')
-	    model.estimate_states(data, processes=processes)
+        model.estimate_states(data, processes=processes)
         print('Estimating responsibilities')
-	    model.estimate_responsibilities(data, processes=processes)
+        model.estimate_responsibilities(data, processes=processes)
         print('Computing elbo')
-	    model.elbo(data)
+        model.elbo(data)
 
         elbos.append(model.elbo_history[-1])
         diff = elbos[-1] - elbos[-2]
