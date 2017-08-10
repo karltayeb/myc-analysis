@@ -35,15 +35,18 @@ if __name__ == "__main__":
     elbos = [-1e100]
     i = 0
     while(True):
-        if i % 5 == 0:
-            model_save_path = '/'.join(output_directory.split('/')) \
-                + '/model' + str(i)
-            pickle.dump(model, open(model_save_path, 'wb'))
-
-        model.estimate_states(data, processes=processes)
-        model.estimate_responsibilities(data, processes=processes)
-        model.elbo(data)
+        model_save_path = '/'.join(output_directory.split('/')) \
+            + '/model' + str(i)
+        pickle.dump(model, open(model_save_path, 'wb'))
+	
         i += 1
+        print(i)
+        print('Estimating states')
+	    model.estimate_states(data, processes=processes)
+        print('Estimating responsibilities')
+	    model.estimate_responsibilities(data, processes=processes)
+        print('Computing elbo')
+	    model.elbo(data)
 
         elbos.append(model.elbo_history[-1])
         diff = elbos[-1] - elbos[-2]
@@ -52,6 +55,6 @@ if __name__ == "__main__":
             break
 
     model_save_path = '/'.join(output_directory.split('/')) \
-        + '/model' + str(i)
+        + '/model_final'
 
     pickle.dump(model, open(model_save_path, 'wb'))
