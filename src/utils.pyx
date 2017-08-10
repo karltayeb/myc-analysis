@@ -95,7 +95,7 @@ cpdef double normal_logpdf(
 
 
 @cython.boundscheck(False)
-cpdef double expected_normal_logpdf(
+cpdef double expected_normal_logpdf_old(
     np.float64_t[:] x,
     np.float64_t[:] mean,
     np.float64_t[:, :] covariance,
@@ -115,6 +115,26 @@ cpdef double expected_normal_logpdf(
     const = dim * log(2 * M_PI) + log(np.linalg.det(np.asarray(covariance)))
     
     result = -0.5 * (expected_quad + const)
+    return result
+
+
+@cython.boundscheck(False)
+cpdef double expected_normal_logpdf(
+    np.float64_t[:] x,
+    np.float64_t[:] mean,
+    np.float64_t[:, :] covariance,
+    np.float64_t[:, :] precision,
+    np.float64_t[:, :] V):
+
+    cdef int i, dim = x.shape[0]
+    cdef np.float64_t[:] residual = np.zeros(dim, dtype=np.float64)
+    cdef double expected_quad
+    cdef double const
+    cdef double result
+
+    result = normal_logpdf(x, mean, covariance, precision)
+    result = result - 0.5 * np.trace(np.dot(covariance, V))
+    
     return result
 
 

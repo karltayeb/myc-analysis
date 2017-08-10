@@ -3,6 +3,8 @@ import cython
 import numpy as np
 cimport numpy as np
 from scipy import linalg
+cimport utils as utils
+from utils cimport dot
 
 
 @cython.boundscheck(False) # turn off bounds-checking for entire function
@@ -304,6 +306,50 @@ def _smooth_pair(smoothed_state_covariances, kalman_smoothing_gains):
                    kalman_smoothing_gains[t - 1].T)
         )
     return pairwise_covariances
+
+
+@cython.boundscheck(False) # turn off bounds-checking for entire function
+cdef _woodbury_inversion_old(
+    np.ndarray[np.float64_t, ndim=2] Ainv,
+    np.ndarray[np.float64_t, ndim=2] U,
+    np.ndarray[np.float64_t, ndim=2] Cinv,
+    np.ndarray[np.float64_t, ndim=2] V):
+    
+    cdef int ndim = Ainv.shape[0]
+    cdef int mdim = Cinv.shape[0]
+
+    cdef np.float64_t [:, :] nXn_inverse = np.zeros((ndim, ndim), dtype=np.float64)
+    cdef np.float64_t [:, :] mXm_inverse = np.zeros((mdim, mdim), dtype=np.float64)
+    cdef np.float64_t[:, :] nXm = np.zeros((ndim, mdim), dtype=np.float64)
+    cdef np.float64_t[:, :] nXm2 = np.zeros((ndim, mdim), dtype=np.float64)
+    cdef np.float64_t[:, :] mXn = np.zeros((mdim, ndim), dtype=np.float64)
+    cdef np.float64_t[:, :] mXm = np.zeros((mdim, mdim), dtype=np.float64)
+    cdef np.float64_t[:, :] nXn = np.zeros((ndim, ndim), dtype=np.float64)
+
+    # VAinvU + Cinv
+    dot(V, Ainv, mXn)
+    dot(mXn, U, mXm)
+
+    cdef int i, j
+    for i in range(mdim):
+        for j in range(mdim):
+            mXm[i, j] = mXm[i, j] + Cinv[i, j]
+
+    # invert it, X = (VA^-1U +C^-1)^-1
+    mXm_inverse = np.linalg.inv(np.asarray(mXm))
+
+
+    # A^-1 U X V A^-1
+    dot(Ainv, U, nXm)
+    dot(nXm, mXm_inverse, nXm2)
+    dot(nXm2, V, nXn)
+    dot(nXn, Ainv, nXn_inverse)
+
+    for i in range(ndim):
+        for j in range(ndim):
+            nXn_inverse[i, j] = Ainv[i, j] - nXn_inverse[i, j]
+
+    return nXn_inverse
 
 
 @cython.boundscheck(False) # turn off bounds-checking for entire function

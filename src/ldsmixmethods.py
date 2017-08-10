@@ -1,6 +1,6 @@
 import pykalman.standard as filtermethods
-import mycanalysis.src.ldsinference as ldsinference
-import mycanalysis.src.utils as utils
+import ldsinference as ldsinference
+import utils as utils
 import numpy as np
 import scipy as sp
 from scipy.misc import logsumexp
@@ -127,20 +127,21 @@ def _estimate_responsibilities(observation, state_means, state_covariances,
                                component_weights):
     """
     estimate responsibilities for an observation
-
+    """
     arguments = {
         'state_means': state_means,
         'state_covariances': state_covariances,
         'observation_covariance': observation_covariance,
         'component_weights': component_weights,
     }
-    """
+    
 
     k_components = component_weights.shape[0]
     t_timepoints = observation.shape[0]
 
     expected_squared_errors = np.zeros(k_components)
 
+    """
     for k in range(k_components):
         for t in range(t_timepoints):
             expected_squared_errors[k] += -0.5 * \
@@ -149,12 +150,13 @@ def _estimate_responsibilities(observation, state_means, state_covariances,
                     A=observation_precision,
                     V=state_covariances[k, t]
                 )
-    # expected_conditional_likelihoods = \
-    #    _expected_conditional_likelihoods(observation, **arguments)
+    """
+    expected_conditional_likelihoods = \
+        _expected_conditional_likelihoods(observation, **arguments)
 
     responsibilities = np.exp(
-            expected_squared_errors -
-            logsumexp(expected_squared_errors)
+            expected_conditional_likelihoods -
+            logsumexp(expected_conditional_likelihoods)
     )
 
     return responsibilities
