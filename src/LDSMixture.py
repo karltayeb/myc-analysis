@@ -361,7 +361,7 @@ class LDSMixture:
             responsibilities=self.responsibilities
         )
 
-    def estimate_states(self, data, processes=1):
+    def estimate_states(self, data):
         """
         estimates state sequences for all trajectories/clusters
         """

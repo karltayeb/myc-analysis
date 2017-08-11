@@ -11,7 +11,10 @@ if __name__ == "__main__":
     data_path = sys.argv[2]
     initialization_path = sys.argv[3]
     threshold = float(sys.argv[4])
-    processes = int(sys.argv[5])
+
+    print('using:', data_path, 'to source data')
+    print('using:', initialization_path, 'for model parameters')
+    print('declaring convergence at elbo change < ', int(threshold))
 
     output_directory = '/'.join(output_directory.split('/'))
     if not os.path.isdir(output_directory):
@@ -26,32 +29,33 @@ if __name__ == "__main__":
     N = data.shape[0]
     K = model.K
 
-    responsibilities = np.random.uniform(0, 1, (N, K))
+    print('generating random initial responsibilities')
+    responsibilities = np.random.uniform(5, 10, (N, K))
     responsibilities = \
         responsibilities / responsibilities.sum(axis=1)[:, np.newaxis]
 
     model.responsibilities = responsibilities
-    models = [model]
-    elbos = [-1e100]
-    i = 0
-    while(True):
-        if i % 5 == 0:
-            model_save_path = '/'.join(output_directory.split('/')) \
-                + '/model' + str(i)
-            pickle.dump(model, open(model_save_path, 'wb'))
 
-        model.estimate_states(data, processes=processes)
-        model.estimate_responsibilities(data, processes=processes)
+    models = [model]
+    i = 0
+    while(model.elbo_delta() > threshold):
+        model_save_path = '/'.join(output_directory.split('/')) \
+            + '/model' + str(i)
+        pickle.dump(model, open(model_save_path, 'wb'))
+
+        model.estimate_states(data)
         model.elbo(data)
+        print(model.elbo_delta())
+        assert(model.elbo_delta() >= 0)
+
+        model.estimate_responsibilities(data)
+        model.elbo(data)
+        print(model.elbo_delta())
+        assert(model.elbo_delta() >= 0)
+
         i += 1
 
-        elbos.append(model.elbo_history[-1])
-        diff = elbos[-1] - elbos[-2]
-        print(i, diff)
-        if (diff) < threshold:
-            break
-
+    # save final model
     model_save_path = '/'.join(output_directory.split('/')) \
-        + '/model' + str(i)
-
+        + '/model_final'
     pickle.dump(model, open(model_save_path, 'wb'))
