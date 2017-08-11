@@ -1,12 +1,12 @@
 import numpy as np
-from LDSMethods import (_update_observation_covariance,
-                        _update_transition_covariances,
-                        _update_component_weights,
-                        _update_initial_state_means,
-                        _update_initial_state_covariance,
-                        _estimate_states,
-                        _estimate_responsibilities,
-                        _elbo)
+from ldsmixmethods import (_update_observation_covariance,
+                           _update_transition_covariances,
+                           _update_component_weights,
+                           _update_initial_state_means,
+                           _update_initial_state_covariance,
+                           _estimate_states,
+                           _estimate_responsibilities,
+                           _elbo)
 
 
 class LDSMixture:
