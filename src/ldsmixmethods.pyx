@@ -346,7 +346,7 @@ def _state_sequence_entropy(state_covariances, pairwise_covariances):
 def _elbo(data, responsibilities, state_means, state_covariances,
           pairwise_covariances, component_weights, observation_covariance,
           initial_state_means, initial_state_covariances,
-          transition_covariances, processes=1):
+          transition_covariances):
     """
     computed the evidence lower bound of the data
     returns float: evidence lower bound of data
@@ -473,7 +473,7 @@ def _filter_and_smooth(f, included, data):
     given all of the data. relies on kalman filter package pykalman
     """
     # f is none when no observations areassigned to it
-    Z = data[included].T
+    Z = data[included].swapaxes(0, 1)
 
     (predicted_state_means, predicted_state_covariances,
      kalman_gains, filtered_state_means, filtered_state_covariances) = (
