@@ -99,8 +99,9 @@ def _estimate_states(data, transition_matrix, observation_matrix,
             responsibilities=responsibilities[:, k]
         )
 
-        state_means[k], state_covariances[k], pairwise_covariances[k] = \
-            _filter_and_smooth(f, included, data)
+        if f is not None:
+            state_means[k], state_covariances[k], pairwise_covariances[k] = \
+                _filter_and_smooth(f, included, data)
 
 
 def _single_estimate_states(k, data, transition_matrix, observation_matrix,
@@ -471,48 +472,40 @@ def _filter_and_smooth(f, included, data):
     kalman filtering step, estimates distribution over state sequence
     given all of the data. relies on kalman filter package pykalman
     """
-    # estimate states
-    if f is not None:
-        # f is none when no observations areassigned to it
-        Z = data[included].T
+    # f is none when no observations areassigned to it
+    Z = data[included].T
 
-        (predicted_state_means, predicted_state_covariances,
-         kalman_gains, filtered_state_means, filtered_state_covariances) = (
-            ldsinference._filter(
-                transition_matrix=f['transition_matrix'],
-                observation_matrix=f['observation_matrix'],
-                transition_covariance=f['transition_covariance'],
-                observation_precision=f['observation_precision'],
-                initial_state_mean=f['initial_state_mean'],
-                initial_state_covariance=f['initial_state_covariance'],
-                observations=Z
-            )
+    (predicted_state_means, predicted_state_covariances,
+     kalman_gains, filtered_state_means, filtered_state_covariances) = (
+        ldsinference._filter(
+            transition_matrix=f['transition_matrix'],
+            observation_matrix=f['observation_matrix'],
+            transition_covariance=f['transition_covariance'],
+            observation_precision=f['observation_precision'],
+            initial_state_mean=f['initial_state_mean'],
+            initial_state_covariance=f['initial_state_covariance'],
+            observations=Z
         )
+    )
 
-        (smoothed_state_means, smoothed_state_covariances,
-            kalman_smoothing_gains) = (
-            ldsinference._smooth(
-                transition_matrix=f['transition_matrix'],
-                filtered_state_means=filtered_state_means,
-                filtered_state_covariances=filtered_state_covariances,
-                predicted_state_means=predicted_state_means,
-                predicted_state_covariances=predicted_state_covariances
-            )
+    (smoothed_state_means, smoothed_state_covariances,
+        kalman_smoothing_gains) = (
+        ldsinference._smooth(
+            transition_matrix=f['transition_matrix'],
+            filtered_state_means=filtered_state_means,
+            filtered_state_covariances=filtered_state_covariances,
+            predicted_state_means=predicted_state_means,
+            predicted_state_covariances=predicted_state_covariances
         )
+    )
 
-        pairwise_covariances = ldsinference._smooth_pair(
-            smoothed_state_covariances,
-            kalman_smoothing_gains
-        )
+    pairwise_covariances = ldsinference._smooth_pair(
+        smoothed_state_covariances,
+        kalman_smoothing_gains
+    )
 
-        state_means = smoothed_state_means
-        state_covariances = smoothed_state_covariances
-        pairwise_covariances = pairwise_covariances
-
-    else:
-        # no observations are assigned, this cluster isn't being used
-        state_means = None
-        state_covariances = None
-        pairwise_covariances = None
+    state_means = smoothed_state_means
+    state_covariances = smoothed_state_covariances
+    pairwise_covariances = pairwise_covariances
 
     return state_means, state_covariances, pairwise_covariances
