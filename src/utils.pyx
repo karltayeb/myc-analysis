@@ -145,15 +145,18 @@ cpdef double quadratic_expectation(
     return result
 
 
-#@cython.boundscheck(False) # turn off bounds-checking for entire function
-def _woodbury_inversion(
-    np.ndarray[np.float64_t, ndim=2] Ainv,
-    np.ndarray[np.float64_t, ndim=2] U,
-    np.ndarray[np.float64_t, ndim=2] Cinv,
-    np.ndarray[np.float64_t, ndim=2] V):
+@cython.boundscheck(False) # turn off bounds-checking for entire function
+cpdef np.float64_t[:, :] woodbury_inversion(
+    np.float64_t[:, :] Ainv,
+    np.float64_t[:, :] U,
+    np.float64_t[:, :] Cinv,
+    np.float64_t[:, :] V):
     
-    cdef np.ndarray[np.float64_t, ndim=2] inverse
-    cdef np.ndarray[np.float64_t, ndim=2] sub
+    cdef int ndim = Ainv.shape[0]
+    cdef int mdim = Cinv.shape[0]
+    cdef np.float64_t[:, :] inverse
+    cdef np.float64_t[:, :] sub
+
     sub = Cinv + np.linalg.multi_dot([
         V,
         Ainv,
