@@ -1,5 +1,4 @@
 import numpy as np
-from multiprocessing import Pool
 from LDSMethods import (_update_observation_covariance,
                         _update_transition_covariances,
                         _update_component_weights,
@@ -8,7 +7,6 @@ from LDSMethods import (_update_observation_covariance,
                         _estimate_states,
                         _estimate_responsibilities,
                         _elbo)
-import functools
 
 
 class LDSMixture:
@@ -350,46 +348,18 @@ class LDSMixture:
         self.estimate_responsibilities(data)
         self.estimate_states(data)
 
-    def estimate_responsibilities(self, data, processes=1):
+    def estimate_responsibilities(self, data):
         """
         estimate posterior assignment probabilities given state estimates
         """
-        if processes == 1:
-            arguments = {
-                'state_means': self.state_means,
-                'state_covariances': self.state_covariances,
-                'observation_covariance': self.observation_covariance,
-                'component_weights': self.component_weights
-            }
-
-            # get responsibilities for all observations
-            responsibilities = np.array(list(map(
-                functools.partial(
-                    _estimate_responsibilities, **arguments
-                ),
-                data
-            )))
-
-            self.responsibilities = responsibilities
-
-        else:
-            with Pool(processes=processes) as pool:
-                arguments = {
-                    'state_means': self.state_means,
-                    'state_covariances': self.state_covariances,
-                    'observation_covariance': self.observation_covariance,
-                    'component_weights': self.component_weights
-                }
-
-                # get responsibilities for all observations
-                responsibilities = np.array(list(pool.map(
-                    functools.partial(
-                        _estimate_responsibilities, **arguments
-                    ),
-                    data
-                )))
-
-                self.responsibilities = responsibilities
+        _estimate_responsibilities(
+            data=data,
+            state_means=self.state_means,
+            state_covariances=self.state_covariances,
+            observation_precision=np.linalg.inv(self.observation_covariance),
+            component_weights=self.component_weights,
+            responsibilities=self.responsibilities
+        )
 
     def estimate_states(self, data, processes=1):
         """
