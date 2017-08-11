@@ -6,9 +6,9 @@ import numpy
 include_path = [numpy.get_include()]
 
 extensions = [
-    Extension('utils', ['utils.pyx'],
+    Extension('mycanalysis.src.utils', ['utils.pyx'],
               include_dirs=[numpy.get_include()]),
-    Extension('ldsmixmethods', ['ldsmixmethods.pyx'],
+    Extension('mycanalysis.src.ldsmixmethods', ['ldsmixmethods.pyx'],
               include_dirs=[numpy.get_include()])
 ]
 

@@ -46,12 +46,14 @@ if __name__ == "__main__":
         model.estimate_states(data)
         model.elbo(data)
         print(model.elbo_delta())
-        assert(model.elbo_delta() >= 0)
+        if (model.elbo_delta() < 0):
+            break
 
         model.estimate_responsibilities(data)
         model.elbo(data)
         print(model.elbo_delta())
-        assert(model.elbo_delta() >= 0)
+        if(model.elbo_delta() < 0):
+            break
 
         i += 1
 
