@@ -5,9 +5,8 @@ from LDSMethods import (_update_observation_covariance,
                         _update_component_weights,
                         _update_initial_state_means,
                         _update_initial_state_covariance,
-                        _estimate_states, _estimate_states2,
+                        _estimate_states,
                         _estimate_responsibilities,
-                        _single_estimate_states,
                         _elbo)
 import functools
 
@@ -63,26 +62,27 @@ class LDSMixture:
         self.T = T
         N = data.shape[0]
 
-        self.transition_matrix = np.array([[1]])
+        self.transition_matrix = np.array([[1]], dtype=np.float64)
+
         transition_covariance = np.array([[process_noise**2]])
-        self.transition_covariances = np.array([transition_covariance] * K)
+        self.transition_covariances = \
+            np.array([transition_covariance] * K, dtype=np.float64)
 
-        self.observation_matrix = np.array([[1]])
-        self.observation_covariance = np.array([[observation_noise**2]])
+        self.observation_matrix = np.array([[1]], dtype=np.float64)
 
-        self.initial_state_means = np.zeros(K)
-        self.initial_state_covariance = np.array([[1]])
+        self.observation_covariance = \
+            np.array([[observation_noise**2]], dtype=np.float64)
 
-        self.initial_state_means = np.zeros(K)
-        initial_state_covariance = np.array([[1]])
+        self.initial_state_means = np.zeros((K, V), dtype=np.float64)
+
+        initial_state_covariance = np.array([[1]], dtype=np.float64)
         self.initial_state_covariances = \
-            np.array([initial_state_covariance] * K)
+            np.array([initial_state_covariance] * K, dtype=np.float64)
 
         responsibilities = np.random.rand(N, K)
         responsibilities = \
             responsibilities / responsibilities.sum(axis=1)[:, np.newaxis]
         self.responsibilities = responsibilities
-
         self.component_weights = np.ones(K) / K
 
         self.state_means = np.zeros((K, T, U))
@@ -111,45 +111,61 @@ class LDSMixture:
             self.V = dictionary['V']
 
         if 'transition_matrix' in dictionary:
-            self.transition_matrix = dictionary['transition_matrix']
+            self.transition_matrix = \
+                dictionary['transition_matrix'].astype(np.float64)
 
         if 'transition_covariances' in dictionary:
-            self.transition_covariances = dictionary['transition_covariances']
+            self.transition_covariances = \
+                dictionary['transition_covariances'].astype(np.float64)
 
         if 'observation_matrix' in dictionary:
-            self.observation_matrix = dictionary['observation_matrix']
+            self.observation_matrix = \
+                dictionary['observation_matrix'].astype(np.float64)
 
         if'observation_covariance' in dictionary:
-            self.observation_covariance = dictionary['observation_covariance']
+            self.observation_covariance = \
+                dictionary['observation_covariance'].astype(np.float64)
 
         if 'initial_state_means' in dictionary:
-            self.initial_state_means = dictionary['initial_state_means']
+            self.initial_state_means = \
+                dictionary['initial_state_means'].astype(np.float64)
+
+            if self.initial_state_means.ndim == 1:
+                self.initial_state_means = \
+                    np.expand_dims(self.initial_state_means, 1)
 
         if 'initial_state_covariances' in dictionary:
             self.initial_state_covariances = \
-                dictionary['initial_state_covariances']
+                dictionary['initial_state_covariances'].astype(np.float64)
 
         if 'responsibilities' in dictionary:
-            self.responsibilities = dictionary['responsibilities']
+            self.responsibilities = \
+                dictionary['responsibilities'].astype(np.float64)
 
         if 'component_weights' in dictionary:
-            self.component_weights = dictionary['component_weights']
+            self.component_weights = \
+                dictionary['component_weights'].astype(np.float64)
 
         if 'state_means' in dictionary:
-            self.state_means = dictionary['state_means']
+            self.state_means = \
+                dictionary['state_means'].astype(np.float64)
         else:
-            self.state_means = np.zeros((self.K, self.T, self.U))
+            self.state_means = \
+                np.zeros((self.K, self.T, self.U), dtype=np.float64)
 
         if 'state_covariances' in dictionary:
-            self.state_covariances = dictionary['state_covariances']
+            self.state_covariances = \
+                dictionary['state_covariances'].astype(np.float64)
         else:
-            self.state_covariances = np.zeros((self.K, self.T, self.V, self.V))
+            self.state_covariances = \
+                np.zeros((self.K, self.T, self.V, self.V), dtype=np.float64)
 
         if 'pairwise_covariances' in dictionary:
-            self.pairwise_covariances = dictionary['pairwise_covariances']
+            self.pairwise_covariances = \
+                dictionary['pairwise_covariances'].astype(np.float64)
         else:
             self.pairwise_covariances = \
-                np.zeros((self.K, self.T, self.V, self.V))
+                np.zeros((self.K, self.T, self.V, self.V), dtype=np.float64)
 
     def expectation_maximization(self, data, threshold=1e-3, iter_max=1000):
         """
@@ -379,101 +395,19 @@ class LDSMixture:
         """
         estimates state sequences for all trajectories/clusters
         """
-        arguments = {
-            'data': data,
-            'transition_matrix': self.transition_matrix,
-            'observation_matrix': self.observation_matrix,
-            'transition_covariances': self.transition_covariances,
-            'observation_covariance': self.observation_covariance,
-            'initial_state_means': self.initial_state_means,
-            'initial_state_covariances': self.initial_state_covariances,
-            'responsibilities': self.responsibilities
-        }
-        K = self.K
-
-        if processes == 1:
-            results = map(
-                functools.partial(_single_estimate_states, **arguments),
-                range(K)
-            )
-
-            for k, result in enumerate(results):
-                if result[0] is not None:
-                    self.state_means[k] = result[0]
-                    self.state_covariances[k] = result[1]
-                    self.pairwise_covariances[k] = result[2]
-
-                else:
-                    pass
-        else:
-            with Pool(processes=processes) as pool:
-                results = pool.map(
-                    functools.partial(_single_estimate_states, **arguments),
-                    range(K)
-                )
-
-                for k, result in enumerate(results):
-                    if result[0] is not None:
-                        self.state_means[k] = result[0]
-                        self.state_covariances[k] = result[1]
-                        self.pairwise_covariances[k] = result[2]
-
-                    else:
-                        pass
-
-    def single_estimate_state(self, k, data):
-        state_means, state_covariances, pairwise_covariances = \
-            _estimate_states(
-                data=data,
-                transition_matrix=self.transition_matrix,
-                observation_matrix=self.observation_matrix,
-                transition_covariance=self.transition_covariances[k],
-                observation_covariance=self.observation_covariance,
-                initial_state_mean=self.initial_state_means[k],
-                initial_state_covariance=self.initial_state_covariances[k],
-                responsibilities=self.responsibilities[:, k]
-            )
-
-        if state_means is not None:
-            # if we actually got new state estimates update
-            # model attributes
-            self.state_means[k] = state_means
-            self.state_covariances[k] = state_covariances
-            self.pairwise_covariances[k] = pairwise_covariances
-
-        else:
-            # reinitialize the cluster
-            pass
-
-    def estimate_states2(self, data):
-        """
-        estimates state sequences for all trajectories/clusters
-        """
-
-        # estimate state distributions
-        for k in range(self.K):
-            state_means, state_covariances, pairwise_covariances = \
-                _estimate_states2(
-                    data=data,
-                    transition_matrix=self.transition_matrix,
-                    observation_matrix=self.observation_matrix,
-                    transition_covariance=self.transition_covariances[k],
-                    observation_covariance=self.observation_covariance,
-                    initial_state_mean=self.initial_state_means[k],
-                    initial_state_covariance=self.initial_state_covariances[k],
-                    responsibilities=self.responsibilities[:, k]
-                )
-
-            if state_means is not None:
-                # if we actually got new state estimates update
-                # model attributes
-                self.state_means[k] = state_means
-                self.state_covariances[k] = state_covariances
-                self.pairwise_covariances[k] = pairwise_covariances
-
-            else:
-                # reinitialize the cluster
-                pass
+        _estimate_states(
+            data=data,
+            transition_matrix=self.transition_matrix,
+            observation_matrix=self.observation_matrix,
+            transition_covariances=self.transition_covariances,
+            observation_covariance=self.observation_covariance,
+            initial_state_means=self.initial_state_means,
+            initial_state_covariances=self.initial_state_covariances,
+            responsibilities=self.responsibilities,
+            state_means=self.state_means,
+            state_covariances=self.state_covariances,
+            pairwise_covariances=self.pairwise_covariances
+        )
 
     #######################
     # Evaltuation Methods #
