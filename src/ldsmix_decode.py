@@ -2,6 +2,7 @@ import sys
 import os
 import pickle
 import numpy as np
+import copy
 from LDSMixture import LDSMixture
 
 
@@ -36,13 +37,13 @@ if __name__ == "__main__":
 
     model.responsibilities = responsibilities
 
+    model_save_path = '/'.join(output_directory.split('/')) \
+        + '/models'
+
     models = [model]
+    pickle.dump(models, open(model_save_path, 'wb'))
     i = 0
     while(model.elbo_delta() > threshold):
-        model_save_path = '/'.join(output_directory.split('/')) \
-            + '/model' + str(i)
-        pickle.dump(model, open(model_save_path, 'wb'))
-
         model.estimate_states(data)
         model.elbo(data)
         print(model.elbo_delta())
@@ -55,6 +56,8 @@ if __name__ == "__main__":
         if(model.elbo_delta() < 0):
             break
 
+        models.append(copy.deepcopy(model))
+        pickle.dump(models, open(model_save_path, 'wb'))
         i += 1
 
     # save final model
