@@ -3,7 +3,6 @@ cimport numpy as np
 import cython
 from cython.parallel import prange, parallel
 from libc.math cimport log, M_PI
-cimport openmp
 
 @cython.boundscheck(False)
 cpdef void dot(np.float64_t[:, :] A, np.float64_t[:, :] B, np.float64_t[:, :] result) nogil:
@@ -11,7 +10,6 @@ cpdef void dot(np.float64_t[:, :] A, np.float64_t[:, :] B, np.float64_t[:, :] re
     cdef int m = B.shape[0]
     cdef int p = B.shape[1]
     cdef int num_threads
-    num_threads = openmp.omp_get_num_threads()
     cdef int i, j, k
 
     for i in range(n):

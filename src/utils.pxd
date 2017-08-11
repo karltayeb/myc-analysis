@@ -3,7 +3,6 @@ cimport numpy as np
 import cython
 from cython.parallel import prange, parallel
 from libc.math cimport log, M_PI
-cimport openmp
 
 cpdef void dot(np.float64_t[:, :] A, np.float64_t[:, :] B, np.float64_t[:, :] result) nogil
 cpdef double inner(np.float64_t[:] A, np.float64_t[:] B) nogil
