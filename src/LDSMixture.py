@@ -89,12 +89,11 @@ class LDSMixture:
 
     def set_initialization(self, dictionary):
         """
-        Initialize the model
-        we need all the model parameters plus initial responsibilities or
-        initial states and covariances
+        Initialize the model with values from a dictionary
+        dictinary entries tat correspond to model attributes will be assigned
 
-        This isn't a very thoughtful initialization but the rest of the code
-        should work regardless given this information.
+        if a necessary parameter setting is not in the dictionary
+        it gets set to something uninformitive or completely random
         """
         if 'K' in dictionary:
             self.K = dictionary['K']
@@ -196,7 +195,7 @@ class LDSMixture:
 
         # compute updated parameters
         component_weights = _update_component_weights(
-            responsibilities=self.responsibilities
+            self.responsibilities
         )
 
         observation_covariance = _update_observation_covariance(
@@ -239,7 +238,7 @@ class LDSMixture:
         update component weights
         """
         self.component_weights = _update_component_weights(
-                responsibilities=self.responsibilities
+                self.responsibilities
             )
 
     def update_observation_covariance(self, data):
@@ -296,7 +295,7 @@ class LDSMixture:
     # Expectation Methods #
     #######################
 
-    def estep(self, data, threshold=1e-10, iter_max=1000, processes=1):
+    def estep(self, data, threshold=1e-10, iter_max=1000, verbose=False):
         """
         data: samples x timepoints matrix of data
         threshold: covergence threshold for variational inference
@@ -304,42 +303,27 @@ class LDSMixture:
         show training: if true print change in evidence lower bound at
         each iteration
         """
-        responsibilities_distances = []
-        state_means_distances = []
-        state_covariance_distances = []
+        result = 0  # didint converge
 
         for i in range(iter_max):
-            old_state_means = self.state_means
-            old_state_covariances = self.state_covariances
-            old_responsibilities = self.responsibilities
+            self.estimate_states(data)
+            self.estimate_responsibilities(data)
+            self.elbo(data)
 
-            self.estimate_states(data, processes)
-            self.estimate_responsibilities(data, processes)
+            if verbose:
+                print(self.elbo_delta())
 
-            responsibilities_distances.append(
-                np.sqrt(np.sum(np.square(
-                    self.responsibilities - old_responsibilities
-                )))
-            )
+            if self.elbo_delta() < threshold:
+                if self.elbo_delta() < 0:
+                    # not monotonically increasing
+                    # hopefully very small/ due to precision
+                    result = -1  # elbo decreased
+                else:
+                    result = 1  # elbo converged
 
-            state_means_distances.append(
-                np.sqrt(np.sum(np.square(
-                    self.state_means - old_state_means
-                )))
-            )
+                break
 
-            state_covariance_distances.append(
-                np.sqrt(np.sum(np.square(
-                    self.state_covariances - old_state_covariances
-                )))
-            )
-
-            if i >= 1:
-                if (responsibilities_distances[-1] < threshold
-                    and state_means_distances[-1] < threshold
-                        and state_covariance_distances[-1] < threshold):
-
-                    break
+        return result
 
     def _estep(self, data):
         """
@@ -383,7 +367,7 @@ class LDSMixture:
     # Evaltuation Methods #
     #######################
 
-    def elbo(self, data, processes=1):
+    def elbo(self, data):
         """
         computed the evidence lower bound of the data
         returns float: evidence lower bound of data
@@ -398,8 +382,7 @@ class LDSMixture:
             observation_covariance=self.observation_covariance,
             initial_state_means=self.initial_state_means,
             initial_state_covariances=self.initial_state_covariances,
-            transition_covariances=self.transition_covariances,
-            processes=processes
+            transition_covariances=self.transition_covariances
         )
 
         self.elbo_history.append(elbo)
