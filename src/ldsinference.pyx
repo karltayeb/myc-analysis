@@ -1,12 +1,12 @@
 # cython: profile=True
 import cython
 import numpy as np
-cimport numpy as np
+# cimport numpy as np
 from scipy import linalg
 
 
-@cython.boundscheck(False) # turn off bounds-checking for entire function
-cpdef _filter_predict(transition_matrix, transition_covariance,
+#@cython.boundscheck(False) # turn off bounds-checking for entire function
+def _filter_predict(transition_matrix, transition_covariance,
                     current_state_mean, current_state_covariance):
     """
     Calculate the mean and covariance of :math:`P(x_{t+1} | z_{0:t})`
@@ -36,8 +36,8 @@ cpdef _filter_predict(transition_matrix, transition_covariance,
     return (predicted_state_mean, predicted_state_covariance)
 
 
-@cython.boundscheck(False) # turn off bounds-checking for entire function
-cpdef _filter_correct(observation_matrix, observation_precision,
+#@cython.boundscheck(False) # turn off bounds-checking for entire function
+def _filter_correct(observation_matrix, observation_precision,
                     predicted_state_mean, predicted_state_covariance,
                     observation):
     """
@@ -97,8 +97,8 @@ cpdef _filter_correct(observation_matrix, observation_precision,
     return (kalman_gain, corrected_state_mean,
             corrected_state_covariance)
 
-@cython.boundscheck(False) # turn off bounds-checking for entire function
-cpdef _filter(transition_matrix, observation_matrix, transition_covariance,
+#@cython.boundscheck(False) # turn off bounds-checking for entire function
+def _filter(transition_matrix, observation_matrix, transition_covariance,
             observation_precision, initial_state_mean,
             initial_state_covariance, observations):
     """
@@ -165,8 +165,8 @@ cpdef _filter(transition_matrix, observation_matrix, transition_covariance,
             filtered_state_covariances)
 
 
-@cython.boundscheck(False) # turn off bounds-checking for entire function
-cpdef _smooth_update(transition_matrix, filtered_state_mean,
+#@cython.boundscheck(False) # turn off bounds-checking for entire function
+def _smooth_update(transition_matrix, filtered_state_mean,
                    filtered_state_covariance, predicted_state_mean,
                    predicted_state_covariance, next_smoothed_state_mean,
                    next_smoothed_state_covariance):
@@ -215,8 +215,8 @@ cpdef _smooth_update(transition_matrix, filtered_state_mean,
             kalman_smoothing_gain)
 
 
-@cython.boundscheck(False) # turn off bounds-checking for entire function
-cpdef _smooth(transition_matrix, filtered_state_means,
+#@cython.boundscheck(False) # turn off bounds-checking for entire function
+def _smooth(transition_matrix, filtered_state_means,
             filtered_state_covariances, predicted_state_means,
             predicted_state_covariances):
     """
@@ -264,8 +264,8 @@ cpdef _smooth(transition_matrix, filtered_state_means,
             kalman_smoothing_gains)
 
 
-@cython.boundscheck(False) # turn off bounds-checking for entire function
-cpdef _smooth_pair(smoothed_state_covariances, kalman_smoothing_gains):
+#@cython.boundscheck(False) # turn off bounds-checking for entire function
+def _smooth_pair(smoothed_state_covariances, kalman_smoothing_gains):
     """
     Calculate pairwise covariance between hidden states
     Calculate covariance between hidden states at :math:`t` and :math:`t-1` for
@@ -288,8 +288,8 @@ cpdef _smooth_pair(smoothed_state_covariances, kalman_smoothing_gains):
     return pairwise_covariances
 
 
-@cython.boundscheck(False) # turn off bounds-checking for entire function
-cpdef _woodbury_inversion(
+#@cython.boundscheck(False) # turn off bounds-checking for entire function
+def _woodbury_inversion(
     np.ndarray[np.float64_t, ndim=2] Ainv,
     np.ndarray[np.float64_t, ndim=2] U,
     np.ndarray[np.float64_t, ndim=2] Cinv,

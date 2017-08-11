@@ -1,11 +1,11 @@
-from pykalman import KalmanFilter
+import ldsinference as ldsinference
 import pykalman.standard as filtermethods
 import numpy as np
 import scipy as sp
-import functools
-from multiprocessing import Pool
 from scipy.misc import logsumexp
 from scipy.stats import multivariate_normal
+import utils
+from utils import expected_normal_logpdf
 
 
 ####################
@@ -76,26 +76,30 @@ def _update_initial_state_covariance(initial_state_mean, state_means,
 #####################
 
 def _estimate_states(data, transition_matrix, observation_matrix,
-                     transition_covariance, observation_covariance,
-                     initial_state_mean, initial_state_covariance,
-                     responsibilities):
+                     transition_covariances, observation_covariance,
+                     initial_state_means, initial_state_covariances,
+                     responsibilities,
+                     state_means, state_covariances, pairwise_covariances):
     """
     estimate states for a single component
     """
-    f, included = _initialize_filter(
-        transition_matrix=transition_matrix,
-        observation_matrix=observation_matrix,
-        transition_covariance=transition_covariance,
-        observation_covariance=observation_covariance,
-        initial_state_mean=initial_state_mean,
-        initial_state_covariance=initial_state_covariance,
-        responsibilities=responsibilities
-    )
+    if initial_state_means.ndim == 1:
+        initial_state_means = np.expand_dims(initial_state_means, 1)
 
-    means, covariances, pairwise_covariances = \
-        _filter_and_smooth(f, included, data)
+    k_components = responsibilities.shape[1]
+    for k in range(k_components):
+        f, included = _initialize_filter(
+            transition_matrix=transition_matrix,
+            observation_matrix=observation_matrix,
+            transition_covariance=transition_covariances[k],
+            observation_covariance=observation_covariance,
+            initial_state_mean=initial_state_means[k],
+            initial_state_covariance=initial_state_covariances[k],
+            responsibilities=responsibilities[:, k]
+        )
 
-    return means, covariances, pairwise_covariances
+        state_means[k], state_covariances[k], pairwise_covariances[k] = \
+            _filter_and_smooth(f, included, data)
 
 
 def _single_estimate_states(k, data, transition_matrix, observation_matrix,
@@ -117,29 +121,6 @@ def _single_estimate_states(k, data, transition_matrix, observation_matrix,
 
     means, covariances, pairwise_covariances = \
         _filter_and_smooth(f, included, data)
-
-    return means, covariances, pairwise_covariances
-
-
-def _estimate_states2(data, transition_matrix, observation_matrix,
-                      transition_covariance, observation_covariance,
-                      initial_state_mean, initial_state_covariance,
-                      responsibilities):
-    """
-    estimate states for a single component
-    """
-    f, included = _initialize_filter2(
-        transition_matrix=transition_matrix,
-        observation_matrix=observation_matrix,
-        transition_covariance=transition_covariance,
-        observation_covariance=observation_covariance,
-        initial_state_mean=initial_state_mean,
-        initial_state_covariance=initial_state_covariance,
-        responsibilities=responsibilities
-    )
-
-    means, covariances, pairwise_covariances = \
-        _filter_and_smooth2(f, included, data, responsibilities)
 
     return means, covariances, pairwise_covariances
 
@@ -205,6 +186,11 @@ def _expected_conditional_likelihoods(observation, state_means,
     likelihood that the observation was generated from that component
     note this includes component mixture probability
     """
+    if observation.ndim == 1:
+        observation = np.expand_dims(observation, 1)
+
+    if state_means.ndim == 2:
+        state_means = np.expand_dims(state_means, 2)
 
     T = observation.shape[0]
     K = component_weights.shape[0]
@@ -215,12 +201,12 @@ def _expected_conditional_likelihoods(observation, state_means,
     for k in range(K):
         sub = 0
         for t in range(T):
-            sub += _expected_normal_logpdf(
+            sub += expected_normal_logpdf(
                 x=observation[t],
                 mean=state_means[k, t],
                 covariance=observation_covariance,
                 precision=observation_precision,
-                mean_covariance=state_covariances[k, t]
+                V=state_covariances[k, t]
             )
 
         conditional_expected_likelihoods[k] = \
@@ -237,28 +223,38 @@ def _expected_sequence_likelihood(initial_state_mean, initial_state_covariance,
                                   transition_covariance, state_means,
                                   state_covariances, pairwise_covariances):
 
+    if state_means.ndim == 1:
+        state_means = np.expand_dims(state_means, 1)
+
+    if initial_state_mean.ndim == 0:
+        initial_state_mean = np.expand_dims(initial_state_mean, 0)
+
     """
     expectation of state sequence likelihood
     expectation taken over estimated state distribution
     """
+    initial_state_precision = np.linalg.inv(initial_state_covariance)
     expected_sequence_likelihood = 0
-    expected_sequence_likelihood += _expected_normal_logpdf(
+    expected_sequence_likelihood += expected_normal_logpdf(
         x=state_means[0],
         mean=initial_state_mean,
         covariance=initial_state_covariance,
-        mean_covariance=state_covariances[0]
+        precision=initial_state_precision,
+        V=state_covariances[0]
     )
 
     T = state_means.shape[0]
+    transition_precision = np.linalg.inv(transition_covariance)
     for t in range(1, T):
         covariance = state_covariances[t] + state_covariances[t-1] - \
             (2 * pairwise_covariances[t])
 
-        expected_sequence_likelihood += _expected_normal_logpdf(
+        expected_sequence_likelihood += expected_normal_logpdf(
             x=state_means[t],
             mean=state_means[t-1],
             covariance=transition_covariance,
-            mean_covariance=covariance
+            precision=transition_precision,
+            V=covariance
         )
 
     return expected_sequence_likelihood
@@ -317,48 +313,41 @@ def _elbo(data, responsibilities, state_means, state_covariances,
     returns float: evidence lower bound of data
     """
 
+    if data.ndim == 2:
+        data = np.expand_dims(data, 2)
+
+    n_observations = data.shape[0]
+    k_components = component_weights.shape[0]
+
     entropy = 0
     expected_likelihood = 0
 
-    with Pool(processes) as pool:
-
-        arguments = {
-            'state_means': state_means,
-            'state_covariances': state_covariances,
-            'observation_covariance': observation_covariance,
-            'component_weights': component_weights
-        }
-
-        expected_likelihood += np.sum(
-            pool.map(
-                functools.partial(_eol, **{'arguments': arguments}),
-                zip(data, responsibilities)
-            )
+    for n in range(n_observations):
+        expected_likelihood += _expected_observation_likelihood(
+            data[n], responsibilities[n],
+            state_means=state_means,
+            state_covariances=state_covariances,
+            observation_covariance=observation_covariance,
+            component_weights=component_weights
         )
 
-        entropy += np.sum(
-            pool.map(_assignment_entropy, responsibilities)
+    for n in range(n_observations):
+        entropy += _assignment_entropy(responsibilities[n])
+
+    for k in range(k_components):
+        expected_likelihood += _expected_sequence_likelihood(
+            initial_state_mean=initial_state_means[k],
+            initial_state_covariance=initial_state_covariances[k],
+            transition_covariance=transition_covariances[k],
+            state_means=state_means[k],
+            state_covariances=state_covariances[k],
+            pairwise_covariances=pairwise_covariances[k]
         )
 
-        expected_likelihood += np.sum(
-            pool.map(
-                _esl,
-                zip(
-                    initial_state_means,
-                    initial_state_covariances,
-                    transition_covariances,
-                    state_means,
-                    state_covariances,
-                    pairwise_covariances
-                )
-            )
-        )
-
-        entropy += np.sum(
-            pool.map(
-                _sse,
-                zip(state_covariances, pairwise_covariances)
-            )
+    for k in range(k_components):
+        entropy += _state_sequence_entropy(
+            state_covariances=state_covariances[k],
+            pairwise_covariances=pairwise_covariances[k]
         )
 
     elbo = expected_likelihood + entropy
@@ -394,78 +383,30 @@ def _initialize_filter(transition_matrix, observation_matrix,
             *[observation_covariance / r for r in responsibilities[included]]
             )
 
-        f = KalmanFilter(
-            transition_matrices=transition_matrix,
-            observation_matrices=np.tile(
-                observation_matrix, (observation_dim, 1)
-                ),
-            transition_covariance=transition_covariance,
-            observation_covariance=block_observation_covariance,
-            initial_state_mean=initial_state_mean,
-            initial_state_covariance=initial_state_covariance,
-            n_dim_state=1, n_dim_obs=observation_dim
+        observation_precision = np.linalg.inv(observation_covariance)
+
+        block_observation_precision = sp.linalg.block_diag(
+            *[observation_precision * r for r in responsibilities[included]]
         )
+
+        block_observation_matrix = \
+            np.tile(observation_matrix, (observation_dim, 1))
+
+        f = {
+            'transition_matrix': transition_matrix,
+            'observation_matrix': block_observation_matrix,
+            'transition_covariance': transition_covariance,
+            'observation_covariance': block_observation_covariance,
+            'observation_precision': block_observation_precision,
+            'initial_state_mean': initial_state_mean,
+            'initial_state_covariance': initial_state_covariance,
+            'n_dim_state': 1, 'n_dim_obs': observation_dim
+        }
+
     else:
         f = None
 
     return f, included
-
-
-def _initialize_filter2(transition_matrix, observation_matrix,
-                        transition_covariance, observation_covariance,
-                        initial_state_mean, initial_state_covariance,
-                        responsibilities):
-    """
-    creates kalman filter object from model parameters and responsibilities
-    if responsibilities are zero for any observation it will not be included
-    to avoid infinite varaince in the observation covariance matrix for all
-    observation.
-
-    each filter object has its corresponding model paramters and a large block
-    diagonal matrix of the observation covariance scaled by the responsibility
-
-    returns a filter object and a boolean array of included observations
-    """
-
-    included = np.logical_not(np.isclose(responsibilities, 0))
-    observation_dim = np.sum(included)
-
-    if observation_dim > 0:
-        block_observation_covariance = sp.linalg.block_diag(
-            *[observation_covariance for r in responsibilities[included]]
-            )
-        observation_matrix = observation_matrix * \
-            np.sqrt(responsibilities[included]).reshape(-1, 1)
-
-        f = KalmanFilter(
-            transition_matrices=transition_matrix,
-            observation_matrices=observation_matrix,
-            transition_covariance=transition_covariance,
-            observation_covariance=block_observation_covariance,
-            initial_state_mean=initial_state_mean,
-            initial_state_covariance=initial_state_covariance,
-            n_dim_state=1, n_dim_obs=observation_dim
-        )
-    else:
-        f = None
-
-    return f, included
-
-
-def _expected_normal_logpdf(x=None, mean=None, covariance=None, precision=None,
-                            mean_covariance=None):
-
-    if precision is None:
-        precision = np.linalg.pinv(covariance)
-
-    expected_normal = 0
-    expected_normal += \
-        multivariate_normal.logpdf(x=x, mean=mean, cov=covariance)
-    expected_normal += -0.5 * np.trace(np.dot(
-            precision,
-            mean_covariance
-        ))
-    return expected_normal
 
 
 def _filter_and_smooth(f, included, data):
@@ -481,96 +422,33 @@ def _filter_and_smooth(f, included, data):
     # estimate states
     if f is not None:
         # f is none when no observations areassigned to it
-        Z = f._parse_observations(data[included].T)
-
-        (transition_matrices, transition_offsets,
-         transition_covariance, observation_matrices,
-         observation_offsets, observation_covariance,
-         initial_state_mean, initial_state_covariance) = (
-            f._initialize_parameters()
-        )
+        Z = data[included].T
 
         (predicted_state_means, predicted_state_covariances,
-         _, filtered_state_means, filtered_state_covariances) = (
-            filtermethods._filter(
-                transition_matrices, observation_matrices,
-                transition_covariance, observation_covariance,
-                transition_offsets, observation_offsets,
-                initial_state_mean, initial_state_covariance, Z
+         kalman_gains, filtered_state_means, filtered_state_covariances) = (
+            ldsinference._filter(
+                transition_matrix=f['transition_matrix'],
+                observation_matrix=f['observation_matrix'],
+                transition_covariance=f['transition_covariance'],
+                observation_precision=f['observation_precision'],
+                initial_state_mean=f['initial_state_mean'],
+                initial_state_covariance=f['initial_state_covariance'],
+                observations=Z
             )
         )
 
         (smoothed_state_means, smoothed_state_covariances,
             kalman_smoothing_gains) = (
-            filtermethods._smooth(
-                transition_matrices, filtered_state_means,
-                filtered_state_covariances, predicted_state_means,
-                predicted_state_covariances
+            ldsinference._smooth(
+                transition_matrix=f['transition_matrix'],
+                filtered_state_means=filtered_state_means,
+                filtered_state_covariances=filtered_state_covariances,
+                predicted_state_means=predicted_state_means,
+                predicted_state_covariances=predicted_state_covariances
             )
         )
 
-        pairwise_covariances = filtermethods._smooth_pair(
-            smoothed_state_covariances,
-            kalman_smoothing_gains
-        )
-
-        state_means = smoothed_state_means
-        state_covariances = smoothed_state_covariances
-        pairwise_covariances = pairwise_covariances
-
-    else:
-        # no observations are assigned, this cluster isn't being used
-        state_means = None
-        state_covariances = None
-        pairwise_covariances = None
-
-    return state_means, state_covariances, pairwise_covariances
-
-
-def _filter_and_smooth2(f, included, data, responsibilities):
-    """
-    f: kalman filter object
-    included: boolean array indicating which
-    data points have non-zero assignment probability
-    data: data to estimate states on
-
-    kalman filtering step, estimates distribution over state sequence
-    given all of the data. relies on kalman filter package pykalman
-    """
-    # estimate states
-    if f is not None:
-        # f is none when no observations areassigned to it
-        scaled_data = data[included] * \
-            np.sqrt(responsibilities[included]).reshape(-1, 1)
-        Z = f._parse_observations(scaled_data.T)
-
-        (transition_matrices, transition_offsets,
-         transition_covariance, observation_matrices,
-         observation_offsets, observation_covariance,
-         initial_state_mean, initial_state_covariance) = (
-            f._initialize_parameters()
-        )
-
-        (predicted_state_means, predicted_state_covariances,
-         _, filtered_state_means, filtered_state_covariances) = (
-            filtermethods._filter(
-                transition_matrices, observation_matrices,
-                transition_covariance, observation_covariance,
-                transition_offsets, observation_offsets,
-                initial_state_mean, initial_state_covariance, Z
-            )
-        )
-
-        (smoothed_state_means, smoothed_state_covariances,
-            kalman_smoothing_gains) = (
-            filtermethods._smooth(
-                transition_matrices, filtered_state_means,
-                filtered_state_covariances, predicted_state_means,
-                predicted_state_covariances
-            )
-        )
-
-        pairwise_covariances = filtermethods._smooth_pair(
+        pairwise_covariances = ldsinference._smooth_pair(
             smoothed_state_covariances,
             kalman_smoothing_gains
         )
