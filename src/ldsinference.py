@@ -3,7 +3,7 @@
 import numpy as np
 # cimport numpy as np
 from scipy import linalg
-import utils
+import mycanalysis.src.utils as utils
 
 
 # @cython.boundscheck(False) # turn off bounds-checking for entire function
