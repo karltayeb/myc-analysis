@@ -6,7 +6,7 @@ import scipy as sp
 from scipy.misc import logsumexp
 from scipy.stats import multivariate_normal
 import mycanalysis.src.utils as utils
-from utils cimport expected_normal_logpdf, quadratic_expectation
+from mycanalysis.src.utils cimport expected_normal_logpdf, quadratic_expectation
 from libc.math cimport log
 
 ####################
