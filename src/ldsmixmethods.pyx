@@ -200,9 +200,6 @@ cdef _unscaled_responsibilities_estimate(
 ################
 #  likelihoods #
 ################
-def _eol(obsres, arguments):
-    return _expected_observation_likelihood(*obsres, **arguments)
-
 
 def _expected_observation_likelihood(observation, responsibilities,
                                      state_means, state_covariances,
@@ -264,10 +261,6 @@ def _expected_conditional_likelihoods(observation, state_means,
     return conditional_expected_likelihoods
 
 
-def _esl(arguments):
-    return _expected_sequence_likelihood(*arguments)
-
-
 def _expected_sequence_likelihood(initial_state_mean, initial_state_covariance,
                                   transition_covariance, state_means,
                                   state_covariances, pairwise_covariances):
@@ -323,10 +316,6 @@ def _assignment_entropy(responsibilities):
     assignment_entropy = -1 * \
         (active_responsibilities * np.log(active_responsibilities)).sum()
     return assignment_entropy
-
-
-def _sse(arguments):
-    return _state_sequence_entropy(*arguments)
 
 
 def _state_sequence_entropy(state_covariances, pairwise_covariances):
@@ -393,57 +382,6 @@ def _elbo(data, responsibilities, state_means, state_covariances,
 
     expected_likelihood += -0.5 * n_observations * t_timepoints * \
         np.log(np.linalg.det(observation_covariance))
-
-    for n in range(n_observations):
-        entropy += _assignment_entropy(responsibilities[n])
-
-    for k in range(k_components):
-        expected_likelihood += _expected_sequence_likelihood(
-            initial_state_mean=initial_state_means[k],
-            initial_state_covariance=initial_state_covariances[k],
-            transition_covariance=transition_covariances[k],
-            state_means=state_means[k],
-            state_covariances=state_covariances[k],
-            pairwise_covariances=pairwise_covariances[k]
-        )
-
-    for k in range(k_components):
-        entropy += _state_sequence_entropy(
-            state_covariances=state_covariances[k],
-            pairwise_covariances=pairwise_covariances[k]
-        )
-
-    elbo = expected_likelihood + entropy
-
-    return elbo, expected_likelihood, entropy
-
-
-def _elbo2(data, responsibilities, state_means, state_covariances,
-           pairwise_covariances, component_weights, observation_covariance,
-           initial_state_means, initial_state_covariances,
-           transition_covariances, processes=1):
-    """
-    computed the evidence lower bound of the data
-    returns float: evidence lower bound of data
-    """
-
-    if data.ndim == 2:
-        data = np.expand_dims(data, 2)
-
-    n_observations = data.shape[0]
-    k_components = component_weights.shape[0]
-
-    entropy = 0
-    expected_likelihood = 0
-
-    for n in range(n_observations):
-        expected_likelihood += _expected_observation_likelihood(
-            data[n], responsibilities[n],
-            state_means=state_means,
-            state_covariances=state_covariances,
-            observation_covariance=observation_covariance,
-            component_weights=component_weights
-        )
 
     for n in range(n_observations):
         entropy += _assignment_entropy(responsibilities[n])
