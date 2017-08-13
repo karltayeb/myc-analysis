@@ -125,8 +125,8 @@ def _filter(transition_matrix, observation_matrix, transition_covariance,
     filtered_state_covariances : [n_timesteps, n_dim_state]
     """
     n_timesteps = observations.shape[0]
-    n_dim_state = initial_state_mean.shape[0]
     n_dim_obs = observations.shape[1]
+    n_dim_state = initial_state_mean.shape[0]
 
     predicted_state_means = np.zeros((n_timesteps, n_dim_state))
     predicted_state_covariances = np.zeros(
@@ -302,10 +302,6 @@ def test(N=10000, T=20):
 
     initial_state_mean = np.zeros(1)
     initial_state_covariance = np.ones([1, 1])
-
-    block_observation_covariance = linalg.block_diag(
-        *[observation_covariance / r for r in responsibilities]
-    )
 
     block_observation_precision = linalg.block_diag(
         *[observation_precision * r for r in responsibilities]
