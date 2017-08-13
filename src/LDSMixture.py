@@ -178,6 +178,27 @@ class LDSMixture:
             if elbo_diff < threshold:
                 break
 
+    def variational_em(self, data,
+                       e_threshold=1e-3, e_itermax=100,
+                       em_threshold=1e-8, em_itermax=1000):
+
+        converged = 0
+        for i in range(em_itermax):
+            # perform variational e step
+            self.estep(data, threshold=e_threshold, iter_max=e_itermax)
+
+            self.mstep(data)
+            self.elbo(data)
+
+            if self.elbo_delta() < em_threshold:
+                if self.elbo_delta() < 0:
+                    converged = -1
+                else:
+                    converged = 1
+                break
+
+        return converged
+
     ########################
     # Maximization methods #
     ########################
@@ -215,7 +236,7 @@ class LDSMixture:
             )
 
         initial_state_means = _update_initial_state_means(
-            state_means=self.state_means
+            self.state_means
         )
 
         initial_state_covariances = np.zeros((K, V, V))
