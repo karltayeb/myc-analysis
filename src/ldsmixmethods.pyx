@@ -38,8 +38,8 @@ def _update_observation_covariance(data, state_means, state_covariances,
     return observation_covariance
 
 
-def _update_transition_covariances(transition_matrix, state_means,
-                                   state_covariances, pairwise_covariances):
+def _update_transition_covariance(transition_matrix, state_means,
+                                  state_covariances, pairwise_covariances):
 
     return filtermethods._em_transition_covariance(
         transition_matrices=transition_matrix,
@@ -181,19 +181,25 @@ cdef _unscaled_responsibilities_estimate(
     cdef np.float64_t[:] residual = np.zeros(obs_dim, dtype=np.float64)
 
     for k in range(k_components):
-        for t in range(t_timepoints):
-            for i in range(obs_dim):
-                residual[i] = observation[t, i] - state_means[k, t, i]
+
+        if np.isclose(component_weights[k], 0):
+            unscaled_responsibilities[k] = -np.inf
+
+        else:
+            for t in range(t_timepoints):
+                for i in range(obs_dim):
+                    residual[i] = observation[t, i] - state_means[k, t, i]
+
+                unscaled_responsibilities[k] = unscaled_responsibilities[k] + \
+                    quadratic_expectation(
+                        x=residual,
+                        A=observation_precision,
+                        V=state_covariances[k, t]
+                    )
+            unscaled_responsibilities[k] = -0.5 * unscaled_responsibilities[k]
 
             unscaled_responsibilities[k] = unscaled_responsibilities[k] + \
-                quadratic_expectation(
-                    x=residual,
-                    A=observation_precision,
-                    V=state_covariances[k, t]
-                )
-        unscaled_responsibilities[k] = -0.5 * unscaled_responsibilities[k]
-        unscaled_responsibilities[k] = unscaled_responsibilities[k] + \
-            np.log(component_weights[k])
+                np.log(component_weights[k])
 
     responsibilities[...] = unscaled_responsibilities
 
@@ -314,8 +320,13 @@ def _assignment_entropy(responsibilities):
     active_responsibilities = responsibilities[
         np.logical_not(np.isclose(responsibilities, 0))
         ]
-    assignment_entropy = -1 * \
-        (active_responsibilities * np.log(active_responsibilities)).sum()
+
+    if len(active_responsibilities > 0):
+        assignment_entropy = -1 * \
+            (active_responsibilities * np.log(active_responsibilities)).sum()
+
+    else:
+        assignment_entropy = 0
     return assignment_entropy
 
 
@@ -370,15 +381,18 @@ def _elbo(data, responsibilities, state_means, state_covariances,
     for n in range(n_observations):
         for k in range(k_components):
             sub = 0
-            for t in range(t_timepoints):
-                sub += quadratic_expectation(
-                    x=data[n, t] - state_means[k, t],
-                    A=observation_precision,
-                    V=state_covariances[k, t]
-                )
-            sub *= -0.5
-            sub += np.log(component_weights[k])
-            sub *= responsibilities[n, k]
+
+            if component_weights[k] > 0:
+                for t in range(t_timepoints):
+                    sub += quadratic_expectation(
+                        x=data[n, t] - state_means[k, t],
+                        A=observation_precision,
+                        V=state_covariances[k, t]
+                    )
+                sub *= -0.5
+                sub += np.log(component_weights[k])
+                sub *= responsibilities[n, k]
+
             expected_likelihood += sub
 
     expected_likelihood += -0.5 * n_observations * t_timepoints * \

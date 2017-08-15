@@ -1,6 +1,6 @@
 import numpy as np
 from mycanalysis.src.ldsmixmethods import (_update_observation_covariance,
-                                           _update_transition_covariances,
+                                           _update_transition_covariance,
                                            _update_component_weights,
                                            _update_initial_state_means,
                                            _update_initial_state_covariance,
@@ -228,7 +228,7 @@ class LDSMixture:
 
         transition_covariances = np.empty((K, V, V))
         for k in range(K):
-            transition_covariances[k] = _update_transition_covariances(
+            transition_covariances[k] = _update_transition_covariance(
                 transition_matrix=self.transition_matrix,
                 state_means=self.state_means[k],
                 state_covariances=self.state_covariances[k],
@@ -281,7 +281,7 @@ class LDSMixture:
         V = self.V
         transition_covariances = np.empty((K, V, V))
         for k in range(K):
-            transition_covariances[k] = _update_transition_covariances(
+            transition_covariances[k] = _update_transition_covariance(
                 transition_matrix=self.transition_matrix,
                 state_means=self.state_means[k],
                 state_covariances=self.state_covariances[k],
