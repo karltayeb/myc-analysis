@@ -18,9 +18,9 @@ def random_model(N, K, T, U, V):
         'K': K, 'T': T, 'U': U, 'V': V,
         'transition_matrix': np.eye(V),
         'transition_covariances': np.array(
-            [make_spd_matrix(V) for k in range(K)]),
+            [make_spd_matrix(V) * 100 for k in range(K)]),
         'observation_matrix': np.eye(U),
-        'observation_covariance': make_spd_matrix(U) * 100,
+        'observation_covariance': make_spd_matrix(U),
         'initial_state_means': np.random.random((K, V)),
         'initial_state_covariances': np.array(
             [make_spd_matrix(V) for k in range(K)]),
@@ -38,7 +38,6 @@ if __name__ == "__main__":
     output_directory = sys.argv[1]
     data_path = sys.argv[2]
     K = int(sys.argv[3])
-    e_itermax = int(sys.argv[4])
 
     print('using:', data_path, 'to source data')
 
@@ -62,25 +61,22 @@ if __name__ == "__main__":
 
     i = 0
     while(model.elbo_delta() > 1-10):
-        model.estep(data, iter_max=e_itermax)
+        model.estimate_states(data)
+        model.estimate_responsibilities(data)
         print(model.elbo_delta())
 
         model.mstep(data)
         model.elbo(data)
         print(model.elbo_delta())
-        if(model.elbo_delta() < 0):
-            break
 
         models.append(copy.deepcopy(model))
         pickle.dump(models, open(model_save_path, 'wb'))
         i += 1
 
-    # save final model
-    model_save_path = '/'.join(output_directory.split('/')) \
-        + '/model_final_m'
-    pickle.dump(model, open(model_save_path, 'wb'))
+        if(model.elbo_history[-1] - model.elbo_history[-3] < 0):
+            break
 
-    model.estep(data)
+    # save final model
     model_save_path = '/'.join(output_directory.split('/')) \
         + '/model_final'
     pickle.dump(model, open(model_save_path, 'wb'))
