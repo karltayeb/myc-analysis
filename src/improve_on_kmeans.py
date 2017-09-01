@@ -23,7 +23,6 @@ def learn_states(model, data, output_directory, threshold):
     while(model.elbo_delta() > threshold):
         model.estimate_states(data)
         model.estimate_responsibilities(data)
-
         model.elbo(data)
         print(model.elbo_delta())
 
