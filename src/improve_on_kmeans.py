@@ -22,10 +22,10 @@ def learn_states(model, data, output_directory, threshold):
     i = 0
     while(model.elbo_delta() > threshold):
         model.estimate_states(data)
-        model.elbo(data)
-
         model.estimate_responsibilities(data)
+
         model.elbo(data)
+        print(model.elbo_delta())
 
         if(model.elbo_delta() < 0):
             break
@@ -57,14 +57,17 @@ if __name__ == "__main__":
     basedir = '/'.join(basedir.split('/'))
 
     if init_type == 'kmeans':
-        out_dir = basedir + '/k-' + output_id
+        out_dir = basedir + 'k-' + output_id
+
+        if not os.path.isdir(out_dir):
+            os.makedirs(out_dir)
 
         kmeans = KMeans(n_clusters=K).fit(data)
         kmeans_path = out_dir + '/kmeans'
 
         pickle.dump(kmeans, open(kmeans_path, 'wb'))
 
-        model = LDSMixture.LDSMixture()
+        model = LDSMixture()
         model.set_initialization(truth)
 
         responsibilities = np.zeros((N, K))
@@ -76,10 +79,13 @@ if __name__ == "__main__":
         learn_states(model, data, out_dir, 1e-5)
 
     if init_type == 'random':
-        model = LDSMixture.LDSMixture()
+        model = LDSMixture()
         model.set_initialization(truth)
 
-        out_dir = basedir + '/r-' + output_id
+        out_dir = basedir + 'r-' + output_id
+
+        if not os.path.isdir(out_dir):
+            os.makedirs(out_dir)
 
         responsibilities = np.zeros((N, K))
         for n in range(N):
