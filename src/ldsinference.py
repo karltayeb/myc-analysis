@@ -6,7 +6,6 @@ from scipy import linalg
 import mycanalysis.src.utils as utils
 
 
-# @cython.boundscheck(False) # turn off bounds-checking for entire function
 def _filter_predict(transition_matrix, transition_covariance,
                     current_state_mean, current_state_covariance):
     """
@@ -37,7 +36,6 @@ def _filter_predict(transition_matrix, transition_covariance,
     return (predicted_state_mean, predicted_state_covariance)
 
 
-# @cython.boundscheck(False) # turn off bounds-checking for entire function
 def _filter_correct(observation_matrix, observation_precision,
                     predicted_state_mean, predicted_state_covariance,
                     observation):
@@ -88,6 +86,7 @@ def _filter_correct(observation_matrix, observation_precision,
         predicted_state_mean
         + np.dot(kalman_gain, observation - predicted_observation_mean)
     )
+
     corrected_state_covariance = (
         predicted_state_covariance
         - np.dot(kalman_gain,
@@ -99,7 +98,6 @@ def _filter_correct(observation_matrix, observation_precision,
             corrected_state_covariance)
 
 
-# @cython.boundscheck(False) # turn off bounds-checking for entire function
 def _filter(transition_matrix, observation_matrix, transition_covariance,
             observation_precision, initial_state_mean,
             initial_state_covariance, observations):
@@ -167,7 +165,6 @@ def _filter(transition_matrix, observation_matrix, transition_covariance,
             filtered_state_covariances)
 
 
-# @cython.boundscheck(False) # turn off bounds-checking for entire function
 def _smooth_update(transition_matrix, filtered_state_mean,
                    filtered_state_covariance, predicted_state_mean,
                    predicted_state_covariance, next_smoothed_state_mean,
@@ -217,7 +214,6 @@ def _smooth_update(transition_matrix, filtered_state_mean,
             kalman_smoothing_gain)
 
 
-# @cython.boundscheck(False) # turn off bounds-checking for entire function
 def _smooth(transition_matrix, filtered_state_means,
             filtered_state_covariances, predicted_state_means,
             predicted_state_covariances):
@@ -266,7 +262,6 @@ def _smooth(transition_matrix, filtered_state_means,
             kalman_smoothing_gains)
 
 
-# @cython.boundscheck(False) # turn off bounds-checking for entire function
 def _smooth_pair(smoothed_state_covariances, kalman_smoothing_gains):
     """
     Calculate pairwise covariance between hidden states
@@ -288,39 +283,3 @@ def _smooth_pair(smoothed_state_covariances, kalman_smoothing_gains):
                    kalman_smoothing_gains[t - 1].T)
         )
     return pairwise_covariances
-
-
-def test(N=10000, T=20):
-    data = np.random.random((N, T))
-
-    transition_matrix = np.ones([1, 1])
-    transition_covariance = np.ones([1, 1])
-    observation_matrix = np.ones([N, 1])
-    observation_covariance = np.ones([1, 1])
-    observation_precision = linalg.pinv(observation_covariance)
-    responsibilities = np.ones(N)
-
-    initial_state_mean = np.zeros(1)
-    initial_state_covariance = np.ones([1, 1])
-
-    block_observation_precision = linalg.block_diag(
-        *[observation_precision * r for r in responsibilities]
-    )
-
-    (predicted_state_means, predicted_state_covariances,
-     kalman_gains, filtered_state_means, filtered_state_covariances) = (
-        _filter(
-            transition_matrix, observation_matrix,
-            transition_covariance, block_observation_precision,
-            initial_state_mean, initial_state_covariance, data.T
-        )
-    )
-
-    (smoothed_state_means, smoothed_state_covariances,
-        kalman_smoothing_gains) = (
-        _smooth(
-            transition_matrix, filtered_state_means,
-            filtered_state_covariances, predicted_state_means,
-            predicted_state_covariances
-        )
-    )
