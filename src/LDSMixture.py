@@ -1,12 +1,7 @@
 import numpy as np
-from mycanalysis.src.ldsmixmethods import (_update_observation_covariance,
-                                           _update_transition_covariance,
-                                           _update_component_weights,
-                                           _update_initial_state_means,
-                                           _update_initial_state_covariance,
-                                           _estimate_states,
-                                           _estimate_responsibilities,
-                                           _elbo)
+from scipy.misc import logsumexp
+from LinearDynamicalSystem import LinearDynamicalSystem
+import mycanalysis.src.ldsmixmethods as lds
 
 
 class LDSMixture:
@@ -19,33 +14,25 @@ class LDSMixture:
         initial_state_means, initial_state_covariances: parameterize
         initial state distribution for each trajectory
         """
-        self.transition_matrix = None
-        self.transition_covariances = None
 
-        self.observation_matrix = None
-        self.observation_covariances = None
-
-        self.initial_state_means = None
-        self.initial_state_covariances = None
-
+        self.filters = []
         self.responsibilities = None
-
-        self.state_means = None
-        self.state_covariances = None
-        self.pairwise_covariances = None
-
         self.component_weights = None
 
-        self.K = None  # number of mixture components
-        self.U = None  # observation dimensionality
-        self.V = None  # state dimensionality
-        self.T = None  # timepoints
+        self.k_components = None  # number of mixture components
+        self.n_dim_obs = None  # observation dimensionality
+        self.n_dim_state = None  # state dimensionality
+        self.t_timepoints = None  # timepoints
 
         self.elbo_history = [-1e100]
         self.expected_log_likelihood_history = [-1e100]
         self.entropy_history = [-1e100]
 
-    def initialize(self, data, K, U, V, T, process_noise, observation_noise):
+    def initialize(self, data, component_weights=None, responsibilities=None,
+                   k_components=1, n_dim_obs=1, n_dim_state=1, t_timepoints=1,
+                   initial_state_means=None, initial_state_covariances=None,
+                   transition_matrices=None, transition_covariances=None,
+                   observation_matrices=None, observation_covariances=None):
         """
         Initialize the model
         we need all the model parameters plus initial responsibilities or
@@ -54,150 +41,101 @@ class LDSMixture:
         This isn't a very thoughtful initialization but the rest of the code
         should work regardless given this information.
         """
-        self.K = K
-        self.U = U
-        self.V = V
-        self.T = T
-        N = data.shape[0]
 
-        self.transition_matrix = np.array([[1]], dtype=np.float64)
+        # basic assignment of unspecified parameters
+        if initial_state_means is None:
+            initial_state_means = np.zeros((k_components, n_dim_state))
 
-        transition_covariance = np.array([[process_noise**2]])
-        self.transition_covariances = \
-            np.array([transition_covariance] * K, dtype=np.float64)
+        if initial_state_covariances is None:
+            initial_state_covariances = np.array(
+                [np.eye(n_dim_state)] * k_components
+            )
 
-        self.observation_matrix = np.array([[1]], dtype=np.float64)
+        if transition_matrices is None:
+            transition_matrices = np.array(
+                [np.eye(n_dim_state)] * k_components
+            )
 
-        self.observation_covariance = \
-            np.array([[observation_noise**2]], dtype=np.float64)
+        if transition_covariances is None:
+            transition_covariances = np.array(
+                [np.eye(n_dim_state)] * k_components
+            )
 
-        self.initial_state_means = np.zeros((K, V), dtype=np.float64)
+        if observation_matrices is None:
+            observation_matrices = np.array(
+                [np.ones((n_dim_state, n_dim_state))] * k_components
+            )
 
-        initial_state_covariance = np.array([[1]], dtype=np.float64)
-        self.initial_state_covariances = \
-            np.array([initial_state_covariance] * K, dtype=np.float64)
+        if observation_covariances is None:
+            observation_covariances = np.array(
+                [np.eye(n_dim_obs)] * k_components
+            )
 
-        responsibilities = np.random.rand(N, K)
-        responsibilities = \
-            responsibilities / responsibilities.sum(axis=1)[:, np.newaxis]
+        if component_weights is None:
+            component_weights = np.ones(k_components) / k_components
+
+        if responsibilities is None:
+            n_obs = data.shape[0]
+            responsibilities = np.random.random((n_obs, k_components))
+            responsibilities = \
+                responsibilities / responsibilities.sum(axis=1)[:, np.newaxis]
+
+        # initialize filters
+        self.filters = []
+        for k in range(k_components):
+            f = LinearDynamicalSystem(
+                 n_dim_state=n_dim_state,
+                 n_dim_obs=n_dim_obs,
+                 n_obs=1,
+                 initial_state_mean=initial_state_means[k],
+                 initial_state_covariance=initial_state_covariances[k],
+                 transition_matrix=transition_matrices[k],
+                 transition_covariance=transition_covariances[k],
+                 observation_matrix=observation_matrices[k],
+                 observation_covariance=observation_covariances[k],
+            )
+
+            self.filters.append(f)
+
+        self.k_components = k_components
+        self.n_dim_obs = n_dim_obs
+        self.n_dim_state = n_dim_state
+        self.t_timepoints = t_timepoints
+
+        self.component_weights = component_weights
         self.responsibilities = responsibilities
-        self.component_weights = np.ones(K) / K
 
-        self.state_means = np.zeros((K, T, U))
-        self.state_covariances = np.zeros((K, T, V, V))
-        self.pairwise_covariances = np.zeros((K, T, V, V))
+    def variational_em(self, data, threshold=1e-8, maxiter=10000):
+        pass
 
-    def set_initialization(self, dictionary):
+    #################################
+    # Variational inference methods #
+    #################################
+    def estimate_responsibilities(self, data):
         """
-        Initialize the model with values from a dictionary
-        dictinary entries tat correspond to model attributes will be assigned
-
-        if a necessary parameter setting is not in the dictionary
-        it gets set to something uninformitive or completely random
+        estimate posterior assignment probabilities given state estimates
         """
-        if 'K' in dictionary:
-            self.K = dictionary['K']
+        n_obs = data.shape[0]
+        responsibilities = np.zeros((n_obs, self.k_components))
 
-        if 'T' in dictionary:
-            self.T = dictionary['T']
+        for k in range(self.k_components):
+            responsibilities[:, k] = \
+                self.filters[k].expected_log_likelihoods(data).sum(axis=1)
 
-        if 'U' in dictionary:
-            self.U = dictionary['U']
+        responsibilities += np.log(self.component_weights)
+        responsibilities = np.exp(
+            responsibilities -
+            logsumexp(responsibilities, axis=1)[:, np.newaxis]
+        )
 
-        if 'V' in dictionary:
-            self.V = dictionary['V']
+        self.responsibilities = responsibilities
 
-        if 'transition_matrix' in dictionary:
-            self.transition_matrix = \
-                dictionary['transition_matrix'].astype(np.float64)
-
-        if 'transition_covariances' in dictionary:
-            self.transition_covariances = \
-                dictionary['transition_covariances'].astype(np.float64)
-
-        if 'observation_matrix' in dictionary:
-            self.observation_matrix = \
-                dictionary['observation_matrix'].astype(np.float64)
-
-        if'observation_covariance' in dictionary:
-            self.observation_covariance = \
-                dictionary['observation_covariance'].astype(np.float64)
-
-        if 'initial_state_means' in dictionary:
-            self.initial_state_means = \
-                dictionary['initial_state_means'].astype(np.float64)
-
-            if self.initial_state_means.ndim == 1:
-                self.initial_state_means = \
-                    np.expand_dims(self.initial_state_means, 1)
-
-        if 'initial_state_covariances' in dictionary:
-            self.initial_state_covariances = \
-                dictionary['initial_state_covariances'].astype(np.float64)
-
-        if 'responsibilities' in dictionary:
-            self.responsibilities = \
-                dictionary['responsibilities'].astype(np.float64)
-
-        if 'component_weights' in dictionary:
-            self.component_weights = \
-                dictionary['component_weights'].astype(np.float64)
-
-        if 'state_means' in dictionary:
-            self.state_means = \
-                dictionary['state_means'].astype(np.float64)
-        else:
-            self.state_means = \
-                np.zeros((self.K, self.T, self.U), dtype=np.float64)
-
-        if 'state_covariances' in dictionary:
-            self.state_covariances = \
-                dictionary['state_covariances'].astype(np.float64)
-        else:
-            self.state_covariances = \
-                np.zeros((self.K, self.T, self.V, self.V), dtype=np.float64)
-
-        if 'pairwise_covariances' in dictionary:
-            self.pairwise_covariances = \
-                dictionary['pairwise_covariances'].astype(np.float64)
-        else:
-            self.pairwise_covariances = \
-                np.zeros((self.K, self.T, self.V, self.V), dtype=np.float64)
-
-    def expectation_maximization(self, data, threshold=1e-3, iter_max=1000):
+    def estimate_states(self, data):
         """
-        perform em
-        does variational inference over hidden states in e step
-        updates model parameters given hidden state distributions in m step
+        estimates state sequences for all trajectories/clusters
         """
-        elbos = []
-        for i in range(iter_max):
-            elbos.append(self.estep(data))
-            elbos.append(self.mstep(data)[0])
-            elbo_diff = elbos[-1] - elbos[-2]
-            if elbo_diff < threshold:
-                break
-
-    def variational_em(self, data,
-                       e_threshold=1e-3, e_itermax=100,
-                       em_threshold=1e-8, em_itermax=1000):
-
-        converged = 0
-        for i in range(em_itermax):
-            # perform variational e step
-            self.estep(data, threshold=e_threshold, iter_max=e_itermax)
-
-            self.mstep(data)
-            self.elbo(data)
-
-            if self.elbo_delta() < em_threshold:
-                if self.elbo_delta() < 0:
-                    converged = -1
-                else:
-                    converged = 1
-                break
-
-        return converged
+        for k in range(self.k_components):
+            self.filters[k].smooth_multiple(data, self.responsibilities[:, k])
 
     ########################
     # Maximization methods #
@@ -205,112 +143,97 @@ class LDSMixture:
 
     def mstep(self, data):
         """
-        mstep updated model parameters:
-        component_weights
-        observation covariance, shared across clusters
-        transition_covariance, unique to each trajectory
-        initial state distributions for each trajectory
+        perform all parameter updated
         """
-        K = self.K
-        V = self.V
-
-        # compute updated parameters
-        component_weights = _update_component_weights(
-            self.responsibilities
-        )
-
-        observation_covariance = _update_observation_covariance(
-            data=data,
-            state_means=self.state_means,
-            state_covariances=self.state_covariances,
-            responsibilities=self.responsibilities
-        )
-
-        transition_covariances = np.empty((K, V, V))
-        for k in range(K):
-            transition_covariances[k] = _update_transition_covariance(
-                transition_matrix=self.transition_matrix,
-                state_means=self.state_means[k],
-                state_covariances=self.state_covariances[k],
-                pairwise_covariances=self.pairwise_covariances[k]
-            )
-
-        initial_state_means = _update_initial_state_means(
-            self.state_means
-        )
-
-        initial_state_covariances = np.zeros((K, V, V))
-        for k in range(K):
-            initial_state_covariances[k] = _update_initial_state_covariance(
-                initial_state_mean=self.initial_state_means[k],
-                state_means=self.state_means[k],
-                state_covariances=self.state_covariances[k],
-            )
-
-        # update object attributes with new parameter estimates
-        self.component_weights = component_weights
-        self.observation_covariance = observation_covariance
-        self.transition_covariances = transition_covariances
-        self.initial_state_means = initial_state_means
-        self.initial_state_covariances = initial_state_covariances
+        pass
 
     def update_component_weights(self):
         """
         update component weights
         """
-        self.component_weights = _update_component_weights(
-                self.responsibilities
-            )
+        component_weights = \
+            self.responsibilities.sum(axis=0) / self.responsibilities.sum()
+        return component_weights
 
-    def update_observation_covariance(self, data):
+    def update_observation_covariance(self, data, tied=False, inplace=True):
         """
         update observation weights
         """
-        self.observation_covariance = _update_observation_covariance(
-                data=data,
-                state_means=self.state_means,
-                state_covariances=self.state_covariances,
-                responsibilities=self.responsibilities
-            )
+        observation_covariances = \
+            np.zeros((self.k_components, self.n_dim_obs, self.n_dim_obs))
 
-    def update_transition_covariances(self):
+        for k in range(self.k_components):
+            observation_covariances[k] = \
+                self.filters[k].update_observation_covariance(
+                    data, self.responsibilities[:, k], inplace=inplace
+                )
+
+        if tied:
+            # compute joint observation covariance
+            tied_observation_covariance = \
+                np.zeros((self.n_dim_obs, self.n_dim_obs))
+
+            for k in range(self.k_components):
+                tied_observation_covariance += (
+                    self.responsibilities[:, k].sum()
+                    * self.filters[k].observation_covariance
+                )
+
+            tied_observation_covariance /= data.shape[0]
+
+            for k in range(self.k_components):
+                observation_covariances[k] = tied_observation_covariance
+                if inplace:
+                    self.filters[k].observation_covariance = \
+                        tied_observation_covariance
+
+        return observation_covariances
+
+    def update_transition_covariances(self, tied=False, inplace=True):
         """
         update transition covariances for each trajectory
         """
-        K = self.K
-        V = self.V
-        transition_covariances = np.empty((K, V, V))
-        for k in range(K):
-            transition_covariances[k] = _update_transition_covariance(
-                transition_matrix=self.transition_matrix,
-                state_means=self.state_means[k],
-                state_covariances=self.state_covariances[k],
-                pairwise_covariances=self.pairwise_covariances[k]
-            )
+        transition_covariances = \
+            np.zeros((self.k_components, self.n_dim_state, self.n_dim_state))
 
-        self.transition_covariances = transition_covariances
+        for k in range(self.k_components):
+            transition_covariances[k] = \
+                self.filters[k].update_transition_covariance(inplace=inplace)
 
-    def update_initial_state_means(self):
+        if tied:
+            pass
+
+        return transition_covariances
+
+    def update_initial_state_means(self, tied=False, inplace=True):
         """
         update initial state means
         """
-        self.initial_state_means = self.state_means[:, 0]
+        initial_state_means = np.zeros((self.k_components, self.n_dim_state))
+        for k in range(self.k_components):
+            initial_state_means[k] = \
+                self.filters[k].update_initial_state_mean(inplace=inplace)
 
-    def update_initial_state_covariances(self):
+        if tied:
+            pass
+
+        return initial_state_means
+
+    def update_initial_state_covariances(self, tied=False, inplace=True):
         """
         update initial state covariances
         """
-        K = self.K
-        V = self.V
+        initial_state_covariances = \
+            np.zeros((self.k_components, self.n_dim_state, self.n_dim_state))
 
-        initial_state_covariances = np.zeros((K, V, V))
-        for k in range(K):
-            initial_state_covariances[k] = _update_initial_state_covariance(
-                initial_state_mean=self.initial_state_means[k],
-                state_means=self.state_means[k],
-                state_covariances=self.state_covariances[k],
-            )
-        self.initial_state_covariances = initial_state_covariances
+        for k in range(self.k_components):
+            initial_state_covariances[k] = self.filters[k].\
+                update_initial_state_covariance(inplace=inplace)
+
+        if tied:
+            pass
+
+        return initial_state_covariances
 
     #######################
     # Expectation Methods #
@@ -346,71 +269,104 @@ class LDSMixture:
 
         return result
 
-    def _estep(self, data):
-        """
-        one iteration of variational inference for e step
-        """
-        self.estimate_responsibilities(data)
-        self.estimate_states(data)
-
-    def estimate_responsibilities(self, data):
-        """
-        estimate posterior assignment probabilities given state estimates
-        """
-        _estimate_responsibilities(
-            data=data,
-            state_means=self.state_means,
-            state_covariances=self.state_covariances,
-            observation_precision=np.linalg.inv(self.observation_covariance),
-            component_weights=self.component_weights,
-            responsibilities=self.responsibilities
-        )
-
-    def estimate_states(self, data):
-        """
-        estimates state sequences for all trajectories/clusters
-        """
-        _estimate_states(
-            data=data,
-            transition_matrix=self.transition_matrix,
-            observation_matrix=self.observation_matrix,
-            transition_covariances=self.transition_covariances,
-            observation_covariance=self.observation_covariance,
-            initial_state_means=self.initial_state_means,
-            initial_state_covariances=self.initial_state_covariances,
-            responsibilities=self.responsibilities,
-            state_means=self.state_means,
-            state_covariances=self.state_covariances,
-            pairwise_covariances=self.pairwise_covariances
-        )
-
     #######################
     # Evaltuation Methods #
     #######################
 
     def elbo(self, data):
         """
+        compute evidence lower bound
+        """
+        elbo = 0
+
+        # expected likelihood of assignments
+        elbo += (self.responsibilities * np.log(self.component_weights)).sum()
+
+        # expected likelihood of observations from states
+        n_obs = data.shape[0]
+        expected_log_lls = np.zeros((n_obs, self.k_components))
+        for k, f in enumerate(self.filters):
+            expected_log_lls[:, k] = \
+                f.expected_log_likelihoods(data).sum(axis=1)
+
+        elbo += (self.responsibilities * expected_log_lls).sum()
+
+        # expected liklihood of states
+        for f in self.filters:
+            elbo += f.expected_sequence_likelihood()
+
+        # subtract assignment entropy
+        elbo -= (self.responsibilities * np.log(self.responsibilities)).sum()
+
+        # expected liklihood of states
+        for f in self.filters:
+            elbo -= f.sequence_entropy()
+
+        self.elbo_history.append(elbo)
+        return elbo
+
+    def elbo2(self, data, processes=1):
+        """
         computed the evidence lower bound of the data
         returns float: evidence lower bound of data
         """
-        elbo, expected_likelihood, entropy = _elbo(
+        t_timepoints = data.shape[1]
+        state_means = \
+            np.zeros((self.k_components, t_timepoints, self.n_dim_state))
+        state_covariances = np.zeros((
+            self.k_components, t_timepoints, self.n_dim_state, self.n_dim_state
+        ))
+        pairwise_covariances = np.zeros((
+            self.k_components, t_timepoints, self.n_dim_state, self.n_dim_state
+        ))
+        initial_state_means = np.zeros((self.k_components, self.n_dim_state))
+        initial_state_covariances = \
+            np.zeros((self.k_components, self.n_dim_state, self.n_dim_state))
+        transition_covariances = \
+            np.zeros((self.k_components, self.n_dim_state, self.n_dim_state))
+
+        for k, f in enumerate(self.filters):
+            state_means[k] = f.state_means
+            state_covariances[k] = f.state_covariances
+            pairwise_covariances[k] = f.pairwise_covariances
+            initial_state_means[k] = f.initial_state_mean
+            initial_state_covariances[k] = f.initial_state_covariance
+            transition_covariances[k] = f.transition_covariance
+
+        observation_covariance = self.filters[0].observation_covariance
+
+        elbo, expected_likelihood, entropy = lds._elbo(
             data=data,
             responsibilities=self.responsibilities,
-            state_means=self.state_means,
-            state_covariances=self.state_covariances,
-            pairwise_covariances=self.pairwise_covariances,
+            state_means=state_means,
+            state_covariances=state_covariances,
+            pairwise_covariances=pairwise_covariances,
             component_weights=self.component_weights,
-            observation_covariance=self.observation_covariance,
-            initial_state_means=self.initial_state_means,
-            initial_state_covariances=self.initial_state_covariances,
-            transition_covariances=self.transition_covariances
-        )
+            observation_covariance=observation_covariance,
+            initial_state_means=initial_state_means,
+            initial_state_covariances=initial_state_covariances,
+            transition_covariances=transition_covariances)
 
         self.elbo_history.append(elbo)
-        self.expected_log_likelihood_history.append(expected_likelihood)
-        self.entropy_history.append(entropy)
-
         return elbo
+
+    def log_likelihood(self, data):
+        """
+        log likelihood of the data given model w/ current state estimates
+        """
+        log_likelihood = 0
+
+        self.estimate_responsibilities(data)
+        n_obs = data.shape[0]
+        log_lls = np.zeros((n_obs, self.k_components))
+        for k, f in enumerate(self.filters):
+            log_lls[:, k] = \
+                f.log_likelihoods(data).sum(axis=1)
+
+        log_likelihood = \
+            logsumexp(log_lls + np.log(self.component_weights), axis=1).sum()
+
+        return log_likelihood
 
     def elbo_delta(self):
         delta = 0
