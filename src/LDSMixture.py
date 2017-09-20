@@ -1,7 +1,6 @@
 import numpy as np
 from scipy.misc import logsumexp
-from LinearDynamicalSystem import LinearDynamicalSystem
-import mycanalysis.src.ldsmixmethods as lds
+from mycanalysis.src.LinearDynamicalSystem import LinearDynamicalSystem
 
 
 class LDSMixture:
@@ -301,51 +300,6 @@ class LDSMixture:
         # expected liklihood of states
         for f in self.filters:
             elbo -= f.sequence_entropy()
-
-        self.elbo_history.append(elbo)
-        return elbo
-
-    def elbo2(self, data, processes=1):
-        """
-        computed the evidence lower bound of the data
-        returns float: evidence lower bound of data
-        """
-        t_timepoints = data.shape[1]
-        state_means = \
-            np.zeros((self.k_components, t_timepoints, self.n_dim_state))
-        state_covariances = np.zeros((
-            self.k_components, t_timepoints, self.n_dim_state, self.n_dim_state
-        ))
-        pairwise_covariances = np.zeros((
-            self.k_components, t_timepoints, self.n_dim_state, self.n_dim_state
-        ))
-        initial_state_means = np.zeros((self.k_components, self.n_dim_state))
-        initial_state_covariances = \
-            np.zeros((self.k_components, self.n_dim_state, self.n_dim_state))
-        transition_covariances = \
-            np.zeros((self.k_components, self.n_dim_state, self.n_dim_state))
-
-        for k, f in enumerate(self.filters):
-            state_means[k] = f.state_means
-            state_covariances[k] = f.state_covariances
-            pairwise_covariances[k] = f.pairwise_covariances
-            initial_state_means[k] = f.initial_state_mean
-            initial_state_covariances[k] = f.initial_state_covariance
-            transition_covariances[k] = f.transition_covariance
-
-        observation_covariance = self.filters[0].observation_covariance
-
-        elbo, expected_likelihood, entropy = lds._elbo(
-            data=data,
-            responsibilities=self.responsibilities,
-            state_means=state_means,
-            state_covariances=state_covariances,
-            pairwise_covariances=pairwise_covariances,
-            component_weights=self.component_weights,
-            observation_covariance=observation_covariance,
-            initial_state_means=initial_state_means,
-            initial_state_covariances=initial_state_covariances,
-            transition_covariances=transition_covariances)
 
         self.elbo_history.append(elbo)
         return elbo

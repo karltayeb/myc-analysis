@@ -8,7 +8,7 @@ include_path = [numpy.get_include()]
 extensions = [
     Extension('mycanalysis.src.utils', ['utils.pyx'],
               include_dirs=[numpy.get_include()]),
-    Extension('mycanalysis.src.ldsmixmethods', ['ldsmixmethods.pyx'],
+    Extension('mycanalysis.src.LinearDynamicalSystem', ['LinearDynamicalSystem.pyx'],
               include_dirs=[numpy.get_include()])
 ]
 
