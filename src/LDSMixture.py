@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.misc import logsumexp
-from mycanalysis.src.LinearDynamicalSystem import LinearDynamicalSystem
+from src.LinearDynamicalSystem import LinearDynamicalSystem
 
 
 class LDSMixture:
@@ -116,7 +116,6 @@ class LDSMixture:
         """
         n_obs = data.shape[0]
         responsibilities = np.zeros((n_obs, self.k_components))
-
         for k in range(self.k_components):
             responsibilities[:, k] = \
                 self.filters[k].expected_log_likelihoods(data).sum(axis=1)
@@ -136,13 +135,22 @@ class LDSMixture:
         for k in range(self.k_components):
             self.filters[k].smooth_multiple(data, self.responsibilities[:, k])
 
+    def information_estimate_states(self, data):
+        """
+        estimates state sequences for all trajectories/clusters
+        """
+        for k in range(self.k_components):
+            self.filters[k].information_smooth_multiple(
+                data, self.responsibilities[:, k]
+            )
+
     ########################
     # Maximization methods #
     ########################
 
     def mstep(self, data):
         """
-        perform all parameter updated
+        perform all parameter updestated
         """
         pass
 

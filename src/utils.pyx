@@ -1,3 +1,4 @@
+# cython: profile=True
 import numpy as np
 cimport numpy as np
 import cython
@@ -67,6 +68,23 @@ cpdef double elementwise_sum(double[:, :, :] matrix, double[:, :] result):
             for k in range(ax1_dim):
                 result[i, j] = result[i, j] + matrix[k, i, j]
 
+@cython.boundscheck(False)
+cpdef sum(np.float64_t[:, :] matrix, np.float64_t[:] result, int axis):
+    """
+    takes sum of 3d matrix along first axis
+    resturns 2d matrix
+    """
+    if axis == 1:
+        matrix = matrix.T
+
+    cdef int dim0 = matrix.shape[0]
+    cdef int dim1 = matrix.shape[1]
+
+    cdef int i, j
+    for j in range(dim1):
+        result[j] = 0
+        for i in range(dim0):
+            result[j] += matrix[i, j]
 
 @cython.boundscheck(False)
 cpdef double normal_logpdf(
@@ -142,6 +160,25 @@ cpdef double quadratic_expectation(
     result = quad + traceAV
     return result
 
+@cython.boundscheck(False)
+cpdef double quadratic(
+    np.float64_t[:] x,
+    np.float64_t[:, :] A,
+    np.float64_t[:, :] V
+    ):
+    """
+    expectation of quadratic from x'Ax
+    E[x'Ax] = E[x'] A E[x] + tr(AV)
+    """
+    cdef int dim = x.shape[0]
+    cdef np.float64_t[:] temp = np.zeros(dim, dtype=np.float64)
+    cdef double quad
+
+    dot(x[None, :], A, temp[None, :])
+    quad = inner(temp, x)
+
+    return quad
+
 
 @cython.boundscheck(False) # turn off bounds-checking for entire function
 cpdef np.float64_t[:, :] woodbury_inversion(
@@ -170,3 +207,43 @@ cpdef np.float64_t[:, :] woodbury_inversion(
     ])
 
     return inverse
+
+
+@cython.boundscheck(False) # turn off bounds-checking for entire function
+cpdef np.float64_t[:, :] _expected_log_likelihoods(
+    np.float64_t[:, :, :] data,
+    np.float64_t[:, :] observation_precision,
+    np.float64_t[:, :] projected_state_means,
+    np.float64_t[:, :, :] projected_state_covariances,
+    np.float64_t logdet):
+    
+
+    cdef int n_obs = data.shape[0]
+    cdef int t_timepoints = data.shape[1]
+    cdef int n_dim_obs = data.shape[2]
+
+    cdef np.float64_t[:, :] expected_log_likelihoods = np.zeros((n_obs, t_timepoints))
+
+    cdef np.float64_t[:] residual = np.zeros(n_dim_obs)
+
+    cdef double traceAV
+    cdef np.float64_t[:,:] AV = np.zeros((n_dim_obs, n_dim_obs), dtype=np.float64)
+    
+    cdef int n, t, i
+    
+    for t in range(t_timepoints):
+        dot(observation_precision, projected_state_covariances[t], AV)
+        traceAV = trace(AV)
+        for n in range(n_obs):
+            for i in range(n_dim_obs):
+                residual[i] = data[n, t, i] - projected_state_means[t, i]
+            expected_log_likelihoods[n, t] =  expected_log_likelihoods[n, t] + \
+                quadratic(
+                    x=residual,
+                    A=observation_precision,
+                    V=projected_state_covariances[t]
+                ) + traceAV + logdet
+
+            expected_log_likelihoods[n, t] = 0.5 * expected_log_likelihoods[n, t]
+
+    return expected_log_likelihoods

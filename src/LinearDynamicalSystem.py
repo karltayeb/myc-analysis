@@ -4,7 +4,7 @@ import ldsinference
 import ldsparamestimators as params
 
 from mycanalysis.src.utils import (expected_normal_logpdf, normal_logpdf,
-                                   quadratic_expectation)
+                                   quadratic_expectation, quadratic, _expected_log_likelihoods)
 from collections import defaultdict
 from scipy.stats import multivariate_normal
 
@@ -36,11 +36,14 @@ class LinearDynamicalSystem:
         # make block observation matrix and observation covariance
         # this is for the case where we are taking multiple observations
         # at a timepoint
+        self.observation_matrix = observation_matrix
+        self.observation_covariance = observation_covariance
+        self.observation_precision = \
+            np.linalg.pinv(self.observation_covariance)
+
         if n_obs == 1:
-            self.observation_matrix = observation_matrix
-            self.observation_covariance = observation_covariance
-            self.observation_precision = \
-                np.linalg.pinv(self.observation_covariance)
+            self.logdet_observation_covariance = \
+                np.linalg.slogdet(self.observation_covariance)[1]
 
         else:
             self.observation_matrix = \
@@ -52,11 +55,18 @@ class LinearDynamicalSystem:
                     np.linalg.pinv(observation_covariance),
                     self.weights
                 )
+            self.logdet_observation_covariance = \
+                np.linalg.slogdet(observation_covariance)[1] * n_obs \
+                + (np.log(weights) ** n_dim_obs).sum()
 
         # will hold state distributions
         self.state_means = None
         self.state_covariances = None
         self.pariwise_covariances = None
+
+        # cache these so se dont need to keep recomputing them
+        self.projected_state_means = None
+        self.projected_state_covariances = None
 
         self.fixed = defaultdict(bool)
         for param in fixed_params:
@@ -127,6 +137,8 @@ class LinearDynamicalSystem:
 
         if inplace:
             self.observation_covariance = observation_covariance
+            self.logdet_observation_covariance = \
+                np.linalg.slogdet(observation_covariance)[1]
 
         return observation_covariance
 
@@ -163,7 +175,7 @@ class LinearDynamicalSystem:
 
         return initial_state_covariance
 
-    def filter(self, data):
+    def filter(self, data, weights):
         (predicted_state_means, predicted_state_covariances,
          kalman_gains, filtered_state_means, filtered_state_covariances) = \
             ldsinference._filter(
@@ -175,7 +187,7 @@ class LinearDynamicalSystem:
                 initial_state_covariance=self.initial_state_covariance,
                 observations=data)
 
-    def smooth(self, data):
+    def smooth(self, data, cache_projected=True):
         (predicted_state_means, predicted_state_covariances,
          kalman_gains, filtered_state_means, filtered_state_covariances) = \
             ldsinference._filter(
@@ -206,7 +218,10 @@ class LinearDynamicalSystem:
         self.state_covariances = smoothed_state_covariances
         self.pairwise_covariances = pairwise_covariances
 
-    def smooth_multiple(self, data, weights=None):
+        if cache_projected:
+            self.project_states()
+
+    def smooth_multiple(self, data, weights=None, cache_projected=True):
         """
         data [n_obs, t_timepoints, n_dim obs]
         jointly estimates states for multiple concurrent observations
@@ -237,12 +252,78 @@ class LinearDynamicalSystem:
         )
 
         # estimate states on fused filter
-        fused_filter.smooth(X)
+        fused_filter.smooth(X, cache_projected=False)
 
         # update state estimates
         self.state_means = fused_filter.state_means
         self.state_covariances = fused_filter.state_covariances
         self.pairwise_covariances = fused_filter.pairwise_covariances
+
+        if cache_projected:
+            self.project_states()
+
+    def information_smooth(self, data, weights, cache_projected=True):
+        (predicted_state_means, predicted_state_covariances,
+         predicted_information, filtered_state_means,
+         filtered_state_covariances, filtered_information) = \
+            ldsinference._information_filter(
+                transition_matrix=self.transition_matrix,
+                transition_covariance=self.transition_covariance,
+                observation_matrix=self.observation_matrix,
+                observation_precision=self.observation_precision,
+                initial_state_mean=self.initial_state_mean,
+                initial_state_precision=np.linalg.pinv(
+                    self.initial_state_covariance),
+                observations=data,
+                weights=weights
+            )
+
+        (smoothed_state_means, smoothed_state_covariances,
+         kalman_smoothing_gains) = \
+            ldsinference._smooth(
+                transition_matrix=self.transition_matrix,
+                filtered_state_means=filtered_state_means,
+                filtered_state_covariances=filtered_state_covariances,
+                predicted_state_means=predicted_state_means,
+                predicted_state_covariances=predicted_state_covariances
+            )
+
+        pairwise_covariances = ldsinference._smooth_pair(
+            smoothed_state_covariances,
+            kalman_smoothing_gains
+        )
+
+        self.state_means = smoothed_state_means
+        self.state_covariances = smoothed_state_covariances
+        self.pairwise_covariances = pairwise_covariances
+
+        if cache_projected:
+            self.project_states()
+
+    def information_smooth_multiple(self, data, weights=None,
+                                    cache_projected=True):
+        """
+        data [n_obs, t_timepoints, n_dim obs]
+        jointly estimates states for multiple concurrent observations
+        """
+
+        n_obs, t_timepoints = data.shape[:2]
+
+        if weights is None:
+            weights = np.ones(n_obs)
+
+        included = np.where(np.logical_not(np.isclose(weights, 0)))[0]
+
+        X = data[included].view().swapaxes(0, 1)
+        X.shape = (t_timepoints, -1)
+
+        # make a filter for concatenated observations
+
+        # estimate states on fused filter
+        self.information_smooth(X, weights[included], cache_projected=True)
+
+        if cache_projected:
+            self.project_states()
 
     def log_likelihoods(self, data):
         """
@@ -285,25 +366,12 @@ class LinearDynamicalSystem:
         returns expected_log_likelihoods
             [n_obs, t_timepoints] or [t_timepoints]
         """
+        result = _expected_log_likelihoods(
+            data, self.observation_precision, self.projected_state_means,
+            self.projected_state_covariances, self.logdet_observation_covariance
+        )
 
-        if data.ndim == 3:
-            n_obs, t_timepoints = data.shape[:2]
-        if data.ndim == 2:
-            t_timepoints = data.shape[0]
-            n_obs = 1
-            data = data[np.newaxis]
-
-        expected_log_likelihoods = np.zeros((n_obs, t_timepoints))
-        for n in range(n_obs):
-            for t in range(t_timepoints):
-                expected_log_likelihoods[n, t] = expected_normal_logpdf(
-                    x=data[n, t],
-                    mean=np.dot(self.observation_matrix, self.state_means[t]),
-                    covariance=self.observation_covariance,
-                    precision=self.observation_precision,
-                    V=self.state_covariances[t]
-                )
-        return expected_log_likelihoods.squeeze()
+        return np.asarray(result)
 
     def expected_squared_error(self, data):
         """
@@ -382,6 +450,24 @@ class LinearDynamicalSystem:
                 multivariate_normal.entropy(cov=covariance)
 
         return state_sequence_entropy
+
+    def project_states(self):
+        t_timepoints = self.state_means.shape[0]
+        dim = self.n_dim_obs * self.n_obs
+        projected_state_means = np.zeros((t_timepoints, dim))
+        projected_state_covariances = np.zeros((t_timepoints, dim, dim))
+
+        for t in range(t_timepoints):
+            projected_state_means[t] = \
+                np.dot(self.observation_matrix, self.state_means[t])
+            projected_state_covariances[t] = np.dot(
+                self.observation_matrix,
+                np.dot(self.state_covariances[t],
+                       self.observation_matrix.T)
+            )
+
+        self.projected_state_means = projected_state_means
+        self.projected_state_covariances = projected_state_covariances
 
 
 def make_block_observation_matrix(observation_matrix, n_obs):

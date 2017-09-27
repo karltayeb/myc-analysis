@@ -28,3 +28,5 @@ cpdef double quadratic_expectation(
     np.float64_t[:, :] A,
     np.float64_t[:, :] V
 )
+
+cpdef sum(np.float64_t[:, :] matrix, np.float64_t[:] result, int axis)

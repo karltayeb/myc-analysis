@@ -283,3 +283,110 @@ def _smooth_pair(smoothed_state_covariances, kalman_smoothing_gains):
                    kalman_smoothing_gains[t - 1].T)
         )
     return pairwise_covariances
+
+
+def _information_filter(transition_matrix, transition_covariance,
+                        observation_matrix, observation_precision,
+                        initial_state_mean, initial_state_precision,
+                        observations, weights):
+    t_timepoints = observations.shape[0]
+    n_dim_state = initial_state_mean.shape[0]
+    n_obs = weights.shape[0]
+
+    predicted_information_states = np.zeros((t_timepoints, n_dim_state))
+    predicted_information = np.zeros((t_timepoints, n_dim_state, n_dim_state))
+
+    filtered_information_states = np.zeros((t_timepoints, n_dim_state))
+    filtered_information = np.zeros((t_timepoints, n_dim_state, n_dim_state))
+
+    predicted_state_means = np.zeros((t_timepoints, n_dim_state))
+    predicted_state_covariances = \
+        np.zeros((t_timepoints, n_dim_state, n_dim_state))
+
+    filtered_state_means = np.zeros((t_timepoints, n_dim_state))
+    filtered_state_covariances = \
+        np.zeros((t_timepoints, n_dim_state, n_dim_state))
+
+    block_observation_matrix = np.tile(observation_matrix, (n_obs, 1))
+    observation_matrixXobservation_precision = np.asarray([
+        np.dot(observation_matrix.T, (weight * observation_precision)) for weight in weights
+    ])
+
+    for t in range(t_timepoints):
+        if t == 0:
+            predicted_information_states[t] = initial_state_mean
+            predicted_information[t] = initial_state_precision
+        else:
+            (predicted_information_states[t], predicted_information[t], _) = (
+                _information_filter_predict(
+                    transition_matrix,
+                    transition_covariance,
+                    filtered_information_states[t - 1],
+                    filtered_information[t - 1]
+                )
+            )
+
+        (filtered_information_states[t], filtered_information[t]) = \
+            _information_filter_correct(
+                block_observation_matrix,
+                observation_matrixXobservation_precision,
+                predicted_information_states[t],
+                predicted_information[t],
+                observations[t]
+            )
+
+    for t in range(t_timepoints):
+        filtered_state_covariances[t] = np.linalg.inv(filtered_information[t])
+        filtered_state_means[t] = np.dot(
+            filtered_state_covariances[t], filtered_information_states[t]
+        )
+
+        predicted_state_covariances[t] = \
+            np.linalg.inv(predicted_information[t])
+        predicted_state_means[t] = np.dot(
+            predicted_state_covariances[t], predicted_information_states[t]
+        )
+
+    return (predicted_state_means, predicted_state_covariances,
+            predicted_information,
+            filtered_state_means, filtered_state_covariances,
+            filtered_information)
+
+
+def _information_filter_predict(transition_matrix, transition_covariance,
+                                filtered_information_state,
+                                filtered_information):
+
+    inverse_filtered_information = np.linalg.inv(filtered_information)
+    predicted_information = np.linalg.inv(
+        transition_covariance + np.linalg.multi_dot([
+            transition_matrix,
+            inverse_filtered_information,
+            transition_matrix.T
+        ])
+    )
+
+    predicted_information_state = np.linalg.multi_dot([
+        predicted_information,
+        transition_matrix,
+        inverse_filtered_information,
+        filtered_information_state
+    ])
+
+    return (predicted_information_state,
+            predicted_information,
+            inverse_filtered_information)
+
+
+def _information_filter_correct(observation_matrix,
+                                observation_matrixXobservation_precision,
+                                predicted_information_state,
+                                predicted_information, observation):
+
+    filtered_information_state = predicted_information_state + \
+        np.dot(observation_matrixXobservation_precision.squeeze(), observation)
+
+    filtered_information = predicted_information + \
+        np.dot(observation_matrixXobservation_precision.squeeze(), observation_matrix)
+
+    return filtered_information_state, filtered_information
